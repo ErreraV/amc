@@ -1138,19 +1138,41 @@ int main(int argc, char* argv[])
 
     CcBwpCreator::SimpleOperationBandConf bandConf1(centralFrequencyBand1,
                                                     bandwidthBand1,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon);
+                                                    numCcPerBand//,
+                                                    // BandwidthPartInfo::UMi_StreetCanyon
+                                                );
+            
 
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
 
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(100)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(true));
+    // Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(100)));
+    // nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
+    // nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(true));
+    // nrHelper->InitializeOperationBand(&band1);
 
-    nrHelper->InitializeOperationBand(&band1);
+    // Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>(); 
+    //     channelHelper->ConfigureFactories(
+    //     scenario,
+    //     "Default",
+    //     "ThreeGpp"); // Configure the spectrum channel with the scenario
+    // channelHelper->AssignChannelsToBands({band1});
+
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigureFactories("UMi", "Default", "ThreeGpp");
+    /**
+     * Use channelHelper API to define the attributes for the channel model (condition, pathloss and
+     * spectrum)
+     */
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(true));
+    channelHelper->AssignChannelsToBands({band1});
     allBwps = CcBwpCreator::GetAllBwps({band1});
-
+    
     double x = pow(10, totalTxPower / 10);
+
+
+
+
 
     Packet::EnableChecking();
     Packet::EnablePrinting();

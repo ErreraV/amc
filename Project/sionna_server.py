@@ -11,7 +11,7 @@ try:
     import sionna.phy
     from sionna.phy.channel import RayleighBlockFading, AWGN
     from sionna.phy import *
-    from sionna.rt import *
+    # from sionna.rt import *
     SIONNA_AVAILABLE = True
     print("Sionna PHY imported successfully")
 except ImportError as e:
