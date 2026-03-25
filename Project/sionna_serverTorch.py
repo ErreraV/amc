@@ -5,36 +5,29 @@ if os.getenv("CUDA_VISIBLE_DEVICES") is None:
     gpu_num = 0
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{gpu_num}"
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# Force Sionna to use PyTorch backend
+os.environ["SIONNA_BACKEND"] = "pytorch"
 
-try:
-    import sionna.phy
-    from sionna.phy.channel import RayleighBlockFading, AWGN
-    from sionna.phy import *
-    # from sionna.rt import *
-    SIONNA_AVAILABLE = True
-    print("Sionna PHY imported successfully")
-except ImportError as e:
-    print(f"Sionna PHY import error: {e}")
-    SIONNA_AVAILABLE = False
-
-import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    try:
-        tf.config.experimental.set_memory_growth(gpus[0], True)
-    except RuntimeError as e:
-        print(e)
-
-tf.get_logger().setLevel('ERROR')
-
-import numpy as np
-import socket
 import json
+import socket
 import threading
 import logging
 import sys
 import time
+from typing import Optional
+
+import numpy as np
+
+try:
+    import torch
+    import sionna.phy
+    from sionna.phy.channel import RayleighBlockFading, AWGN
+    from sionna.phy.mapping import Constellation, Mapper, Demapper
+    SIONNA_AVAILABLE = True
+    print("Sionna PHY imported successfully (PyTorch backend)")
+except ImportError as e:
+    print(f"Sionna PHY import error: {e}")
+    SIONNA_AVAILABLE = False
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,10 +54,17 @@ class RealisticPHYProcessor:
         }
 
         if self.sionna_available:
+            self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+            print(f"Using device: {self.device}")
+            self.torch_device = torch.device(self.device)
             self.rayleigh_channel = RayleighBlockFading(
-                num_rx=1, num_rx_ant=1, num_tx=1, num_tx_ant=1
+                num_rx=1, num_rx_ant=1, num_tx=1, num_tx_ant=1,
+                device=self.device
             )
-            self.awgn_channel = AWGN()
+            self.awgn_channel = AWGN(device=self.device)
+        else:
+            self.device = None
+            self.torch_device = None
 
         logger.info(f"PHY Processor initialized (Sionna: {'available' if self.sionna_available else 'unavailable'})")
 
@@ -73,56 +73,61 @@ class RealisticPHYProcessor:
             channel_params = self.default_params
 
         phase_noise_std = channel_params['phase_noise_std'] * 0.1
-        phase_noise = tf.random.normal(tf.shape(symbols), stddev=phase_noise_std)
-        phase_noise_complex = tf.complex(tf.zeros_like(phase_noise), phase_noise)
-        symbols_with_phase_noise = symbols * tf.exp(phase_noise_complex)
+        phase_noise = torch.randn(symbols.shape, device=self.device, dtype=torch.float32) * phase_noise_std
+        symbols_with_phase_noise = symbols * torch.exp(1j * phase_noise)
 
-        time_samples = tf.range(tf.shape(symbols)[1], dtype=tf.float32)
-        cfo_hz = tf.random.uniform([], -10.0, 10.0)
+        time_samples = torch.arange(symbols.shape[1], device=self.device, dtype=torch.float32)
+        cfo_hz = torch.empty((), device=self.device).uniform_(-10.0, 10.0)
         cfo_phase = 2.0 * np.pi * cfo_hz * time_samples / channel_params['carrier_frequency']
-        cfo_rotation = tf.exp(tf.complex(tf.zeros_like(cfo_phase), cfo_phase))
-        symbols_with_cfo = symbols_with_phase_noise * tf.expand_dims(cfo_rotation, 0)
+        cfo_rotation = torch.exp(1j * cfo_phase)
+        symbols_with_cfo = symbols_with_phase_noise * cfo_rotation.unsqueeze(0)
 
         return symbols_with_cfo
 
-    def simulate_realistic_channel(self, symbols, snr_db, channel_type="rayleigh", channel_params=None):
+    def simulate_realistic_channel(self, symbols, snr_db, channel_type="rayleigh", channel_params: Optional[dict] = None):
         if channel_params is None:
             channel_params = self.default_params
+
+        channel_response = None
 
         try:
             if channel_type.lower() == "rayleigh":
                 h, tau = self.rayleigh_channel(
-                    batch_size=tf.shape(symbols)[0],
-                    num_time_steps=tf.shape(symbols)[1]
+                    batch_size=symbols.shape[0],
+                    num_time_steps=symbols.shape[1]
                 )
-                h_squeezed = tf.squeeze(h, axis=[1, 2, 3, 4, 5])
+                h_squeezed = torch.squeeze(h, dim=(1, 2, 3, 4, 5))
                 symbols_faded = symbols * h_squeezed
-                avg_channel_gain = tf.reduce_mean(tf.abs(h_squeezed))
-                logger.debug(f"Rayleigh channel: avg gain = {avg_channel_gain.numpy():.3f}") # <--- SAFELY MOVES IT TO CPU FIRST
+                avg_channel_gain = torch.mean(torch.abs(h_squeezed))
+                channel_response = h_squeezed
+                logger.debug(f"Rayleigh channel: avg gain = {avg_channel_gain:.3f}")
+
             elif channel_type.lower() == "awgn":
                 symbols_faded = symbols
 
             elif channel_type.lower() in ["rice", "rician"]:
                 k_factor_linear = 10 ** (channel_params['k_factor'] / 10)
-                los_component = tf.complex(tf.sqrt(k_factor_linear / (k_factor_linear + 1)), 0.0)
+                los_component = torch.complex(torch.sqrt(torch.tensor(k_factor_linear / (k_factor_linear + 1), device=self.device)), torch.tensor(0.0, device=self.device))
                 h_rayleigh, _ = self.rayleigh_channel(
-                    batch_size=tf.shape(symbols)[0],
-                    num_time_steps=tf.shape(symbols)[1]
+                    batch_size=symbols.shape[0],
+                    num_time_steps=symbols.shape[1]
                 )
-                h_rayleigh_squeezed = tf.squeeze(h_rayleigh, axis=[1, 2, 3, 4, 5])
-                nlos_component = h_rayleigh_squeezed * tf.sqrt(1 / (k_factor_linear + 1))
+                h_rayleigh_squeezed = torch.squeeze(h_rayleigh, dim=(1, 2, 3, 4, 5))
+                nlos_component = h_rayleigh_squeezed * torch.sqrt(torch.tensor(1 / (k_factor_linear + 1), device=self.device))
                 h_rice = los_component + nlos_component
                 symbols_faded = symbols * h_rice
+                channel_response = h_rice
 
             elif channel_type.lower() == "urban":
                 h, tau = self.rayleigh_channel(
-                    batch_size=tf.shape(symbols)[0],
-                    num_time_steps=tf.shape(symbols)[1]
+                    batch_size=symbols.shape[0],
+                    num_time_steps=symbols.shape[1]
                 )
-                h_squeezed = tf.squeeze(h, axis=[1, 2, 3, 4, 5])
-                urban_attenuation = tf.complex(0.6, 0.0)
+                h_squeezed = torch.squeeze(h, dim=(1, 2, 3, 4, 5))
+                urban_attenuation = torch.complex(torch.tensor(0.6, device=self.device), torch.tensor(0.0, device=self.device))
                 h_urban = h_squeezed * urban_attenuation
                 symbols_faded = symbols * h_urban
+                channel_response = h_urban
 
             else:
                 symbols_faded = symbols
@@ -133,19 +138,24 @@ class RealisticPHYProcessor:
             modulation_order = self.get_modulation_order(snr_db)
             num_bits_per_symbol = int(np.log2(modulation_order))
 
-            no = sionna.phy.utils.ebnodb2no(snr_db,
+            no = sionna.phy.utils.ebnodb2no(torch.tensor(snr_db, device=self.device, dtype=torch.float32),
                                             num_bits_per_symbol=num_bits_per_symbol,
-                                            coderate=1.0)
+                                            coderate=1.0,
+                                            device=self.device)
 
             symbols_noisy = self.awgn_channel(symbols_impaired, no)
 
-            return symbols_noisy, no, h_squeezed if 'h_squeezed' in locals() else None
+            return symbols_noisy, no, channel_response
 
         except Exception as e:
             logger.error(f"Channel simulation error: {e}")
             num_bits_per_symbol = 2
-            no = sionna.phy.utils.ebnodb2no(snr_db, num_bits_per_symbol=num_bits_per_symbol, coderate=1.0)
-            return self.awgn_channel(symbols, no), no, None
+            no = sionna.phy.utils.ebnodb2no(torch.tensor(snr_db, device=self.device, dtype=torch.float32),
+                                            num_bits_per_symbol=num_bits_per_symbol,
+                                            coderate=1.0,
+                                            device=self.device)
+            symbols_noisy = self.awgn_channel(symbols, no) if self.sionna_available else symbols
+            return symbols_noisy, no, None
 
     def get_modulation_order(self, snr_db):
         if snr_db < 10:
@@ -158,7 +168,12 @@ class RealisticPHYProcessor:
             return 256
 
     def calculate_realistic_bler(self, bits_original, bits_received, packet_size=128):
-        total_bits = len(bits_original)
+        if not isinstance(bits_original, torch.Tensor):
+            bits_original = torch.tensor(bits_original, device=self.device)
+        if not isinstance(bits_received, torch.Tensor):
+            bits_received = torch.tensor(bits_received, device=self.device)
+
+        total_bits = bits_original.numel()
         if total_bits < packet_size:
             packet_size = total_bits
 
@@ -172,15 +187,15 @@ class RealisticPHYProcessor:
             packet_original = bits_original[start_idx:end_idx]
             packet_received = bits_received[start_idx:end_idx]
 
-            packet_errors = tf.reduce_sum(tf.cast(tf.not_equal(packet_original, packet_received), tf.int32))
-            if packet_errors.numpy() > 0:
+            packet_errors = int((packet_original != packet_received).sum().item())
+            if packet_errors > 0:
                 packets_in_error += 1
 
         bler = packets_in_error / num_packets
         return bler, packets_in_error, num_packets
 
     def calculate_realistic_throughput(self, modulation: str, ber: float, bler: float,
-                                       snr: float, success: bool, num_bits: int = None) -> float:
+                                       snr: float, success: bool, num_bits: Optional[int] = None) -> float:
         modulation_rates = {
             "qam4": 2.0,
             "qam16": 4.0,
@@ -219,7 +234,7 @@ class RealisticPHYProcessor:
         return max(0.0, effective_throughput)
 
     def process_transmission_realistic(self, bits: np.ndarray, modulation: str, snr_db: float,
-                                       channel_type: str = "rayleigh", channel_params: dict = None):
+                                       channel_type: str = "rayleigh", channel_params: Optional[dict] = None):
         try:
             k = len(bits)
             min_bits = 1024
@@ -233,29 +248,29 @@ class RealisticPHYProcessor:
                 bits_extended = bits
                 k_processing = k
 
-            bits_tf = tf.cast(bits_extended, tf.float32)
+            bits_torch = torch.tensor(bits_extended, dtype=torch.float32, device=self.device)
 
             modulation_order = int(modulation.replace("qam", "")) if "qam" in modulation else 4
             num_bits_per_symbol = int(np.log2(modulation_order))
 
             if k_processing % num_bits_per_symbol != 0:
                 padding_needed = num_bits_per_symbol - (k_processing % num_bits_per_symbol)
-                bits_padded = tf.concat([bits_tf, tf.zeros(padding_needed)], axis=0)
+                bits_padded = torch.cat([bits_torch, torch.zeros(padding_needed, device=self.device)], dim=0)
                 k_padded = k_processing + padding_needed
             else:
-                bits_padded = bits_tf
+                bits_padded = bits_torch
                 k_padded = k_processing
 
-            bits_reshaped = tf.reshape(bits_padded, [1, k_padded])
+            bits_reshaped = bits_padded.view(1, k_padded)
 
             if modulation_order in [4, 16, 64, 256]:
-                constellation = sionna.phy.mapping.Constellation("qam", num_bits_per_symbol)
+                constellation = Constellation("qam", num_bits_per_symbol, device=self.device)
             else:
-                constellation = sionna.phy.mapping.Constellation("qam", 2)
+                constellation = Constellation("qam", 2, device=self.device)
                 num_bits_per_symbol = 2
                 logger.warning(f"Unknown modulation {modulation}, using QPSK")
 
-            mapper = sionna.phy.mapping.Mapper(constellation=constellation)
+            mapper = Mapper(constellation=constellation, device=self.device)
             symbols = mapper(bits_reshaped)
 
             noisy_symbols, no, channel_response = self.simulate_realistic_channel(
@@ -264,21 +279,21 @@ class RealisticPHYProcessor:
 
             if channel_type.lower() in ["rayleigh", "urban", "rice", "rician"] and channel_response is not None:
                 epsilon = 1e-8
-                channel_conj = tf.math.conj(channel_response)
-                channel_power = tf.abs(channel_response) ** 2 + epsilon
-                equalized_symbols = noisy_symbols * channel_conj / tf.complex(channel_power, tf.zeros_like(channel_power))
+                channel_conj = torch.conj(channel_response)
+                channel_power = torch.abs(channel_response) ** 2 + epsilon
+                equalized_symbols = noisy_symbols * channel_conj / channel_power
             else:
                 equalized_symbols = noisy_symbols
 
-            demapper = sionna.phy.mapping.Demapper("maxlog", constellation=constellation)
+            demapper = Demapper("maxlog", constellation=constellation, device=self.device)
             llrs = demapper(equalized_symbols, no)
-            bits_hat = tf.cast(llrs > 0, tf.float32)
+            bits_hat = (llrs > 0).float()
 
             bits_hat_original = bits_hat[0, :k_processing]
             bits_original = bits_reshaped[0, :k_processing]
 
-            bit_errors = tf.reduce_sum(tf.cast(tf.not_equal(bits_original, bits_hat_original), tf.int32))
-            ber = float(bit_errors.numpy()) / k_processing
+            bit_errors = int((bits_original != bits_hat_original).sum().item())
+            ber = bit_errors / k_processing
 
             bler, packets_in_error, total_packets = self.calculate_realistic_bler(
                 bits_original, bits_hat_original, packet_size=128
@@ -291,7 +306,7 @@ class RealisticPHYProcessor:
 
             result = {
                 'success': bler < 1.0,
-                'bit_errors': int(bit_errors.numpy()),
+                'bit_errors': bit_errors,
                 'total_bits': k_processing,
                 'original_bits': k,
                 'ber': ber,
@@ -379,7 +394,7 @@ class RealisticPHYProcessor:
         }
 
     def process_transmission(self, bits: np.ndarray, modulation: str, snr_db: float,
-                             channel_type: str = "rayleigh", channel_params: dict = None):
+                             channel_type: str = "rayleigh", channel_params: Optional[dict] = None):
         start_time = time.time()
 
         if self.sionna_available and len(bits) >= 8:
@@ -439,6 +454,7 @@ class RealisticSionnaServer:
             self.stop()
 
     def handle_client(self, conn, addr):
+        msg = None
         try:
             data = conn.recv(8192).decode()
             if not data:
@@ -512,7 +528,7 @@ class RealisticSionnaServer:
             logger.error(f"Processing error: {str(e)}")
             error_msg = {
                 "error": str(e),
-                "id": msg.get('id', -1) if 'msg' in locals() else -1,
+                "id": msg.get('id', -1) if msg is not None else -1,
                 "success": False,
                 "ber": 0.5,
                 "bler": 1.0
@@ -548,7 +564,8 @@ class RealisticSionnaServer:
 
 
 def main():
-    print(f"TensorFlow: {tf.__version__}")
+    if SIONNA_AVAILABLE:
+        print(f"PyTorch: {torch.__version__}")
     print(f"Sionna: {'available' if SIONNA_AVAILABLE else 'unavailable (simulation mode)'}")
 
     server = RealisticSionnaServer()

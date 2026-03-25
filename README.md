@@ -78,17 +78,32 @@ make -j
 make install
 ```
 
+
 ```
 cd ~/amc_ws
 wget https://www.nsnam.org/releases/ns-allinone-3.44.tar.bz2
 
 tar -xvjf ns-allinone-3.44.tar.bz2
 cd ns-allinone-3.44
-```
+
+#in .profile or .bash_profile
+export NS3SRC=$HOME/ns-allinone-3.44/ns-3.44/
 
 
 ```
-cd ~/amc_ws/ns-allinone-3.44/ns-3.44/
+
+```
+cd $NS3SRC/contrib
+#you should check right nr version compatible with ns3 on https://cttc-lena.gitlab.io/nr/html/index.html#autotoc_md153
+
+git cl one https://gitlab.com/cttc-lena/nr.git -b  5g-lena-v4.0.y
+```
+
+
+
+
+```
+cd $NS3SRC
 
 ./ns3 configure --build-profile=debug --enable-examples --enable-tests --disable-werror \
 --enable-python-bindings --enable-build-version --prefix=$VENVNS3/ \
