@@ -6,6 +6,7 @@ if os.getenv("CUDA_VISIBLE_DEVICES") is None:
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{gpu_num}"
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 try:
     import sionna.phy
@@ -19,6 +20,7 @@ except ImportError as e:
     SIONNA_AVAILABLE = False
 
 import tensorflow as tf
+tf.config.run_functions_eagerly(False)
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     try:
@@ -98,7 +100,15 @@ class RealisticPHYProcessor:
                 h_squeezed = tf.squeeze(h, axis=[1, 2, 3, 4, 5])
                 symbols_faded = symbols * h_squeezed
                 avg_channel_gain = tf.reduce_mean(tf.abs(h_squeezed))
-                logger.debug(f"Rayleigh channel: avg gain = {avg_channel_gain.numpy():.3f}") # <--- SAFELY MOVES IT TO CPU FIRST
+                # Convert tensor to Python float safely for logging
+                try:
+                    avg_channel_gain_value = float(tf.identity(avg_channel_gain).numpy())
+                except Exception:
+                    try:
+                        avg_channel_gain_value = float(avg_channel_gain)
+                    except:
+                        avg_channel_gain_value = 1.0
+                logger.debug(f"Rayleigh channel: avg gain = {avg_channel_gain_value:.3f}")
             elif channel_type.lower() == "awgn":
                 symbols_faded = symbols
 
@@ -173,7 +183,15 @@ class RealisticPHYProcessor:
             packet_received = bits_received[start_idx:end_idx]
 
             packet_errors = tf.reduce_sum(tf.cast(tf.not_equal(packet_original, packet_received), tf.int32))
-            if packet_errors.numpy() > 0:
+            try:
+                packet_errors_value = int(tf.identity(packet_errors).numpy())
+            except Exception:
+                try:
+                    packet_errors_value = int(packet_errors)
+                except:
+                    packet_errors_value = 0
+
+            if packet_errors_value > 0:
                 packets_in_error += 1
 
         bler = packets_in_error / num_packets
@@ -278,7 +296,14 @@ class RealisticPHYProcessor:
             bits_original = bits_reshaped[0, :k_processing]
 
             bit_errors = tf.reduce_sum(tf.cast(tf.not_equal(bits_original, bits_hat_original), tf.int32))
-            ber = float(bit_errors.numpy()) / k_processing
+            try:
+                bit_errors_value = int(tf.identity(bit_errors).numpy())
+            except Exception:
+                try:
+                    bit_errors_value = int(bit_errors)
+                except:
+                    bit_errors_value = 0
+            ber = float(bit_errors_value) / k_processing
 
             bler, packets_in_error, total_packets = self.calculate_realistic_bler(
                 bits_original, bits_hat_original, packet_size=128
@@ -291,7 +316,7 @@ class RealisticPHYProcessor:
 
             result = {
                 'success': bler < 1.0,
-                'bit_errors': int(bit_errors.numpy()),
+                'bit_errors': bit_errors_value,
                 'total_bits': k_processing,
                 'original_bits': k,
                 'ber': ber,

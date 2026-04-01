@@ -100,7 +100,9 @@ class RealisticPHYProcessor:
                 symbols_faded = symbols * h_squeezed
                 avg_channel_gain = torch.mean(torch.abs(h_squeezed))
                 channel_response = h_squeezed
-                logger.debug(f"Rayleigh channel: avg gain = {avg_channel_gain:.3f}")
+                # Convert CUDA/PyTorch tensor to Python float before formatting
+                avg_channel_gain_value = avg_channel_gain.detach().cpu().item() if torch.is_tensor(avg_channel_gain) else float(avg_channel_gain)
+                logger.debug(f"Rayleigh channel: avg gain = {avg_channel_gain_value:.3f}")
 
             elif channel_type.lower() == "awgn":
                 symbols_faded = symbols
