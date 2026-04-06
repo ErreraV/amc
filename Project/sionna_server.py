@@ -473,9 +473,9 @@ class RealisticSionnaServer:
             try:
                 msg = json.loads(data)
                 self.stats['total_requests'] += 1
-
+                destination = msg.get('type', 'unknown')
                 channel_type = msg.get('channel_type', 'rayleigh')
-                logger.info(f"NS-3 -> Sionna: ID={msg['id']} | channel={channel_type} | "
+                logger.info(f"{destination} -> Sionna: ID={msg['id']} | channel={channel_type} | "
                             f"mod={msg['modulation']} | SNR={msg['snr_db']}dB | bits={msg['k']}")
 
             except json.JSONDecodeError as e:
@@ -529,7 +529,7 @@ class RealisticSionnaServer:
             conn.sendall(response_str.encode())
 
             mode = "Sionna" if result.get('realistic', False) else "Simulated"
-            logger.info(f"Sionna -> NS-3: {mode} | BER={response['ber']:.6f} | "
+            logger.info(f"Sionna -> {destination}: {mode} | BER={response['ber']:.6f} | "
                         f"BLER={response['bler']:.3f} | T={response['effective_throughput']:.1f}Mbps | "
                         f"{response['processing_time_ms']:.1f}ms")
 

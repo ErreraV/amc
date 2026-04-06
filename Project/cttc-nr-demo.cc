@@ -131,6 +131,8 @@ RealisticChannelConfig global_channel_config;
 DynamicMobilityConfig global_mobility_config;
 double simTime = 60.0;
 
+int global_packet_size=64;
+
 RealisticChannelConfig GetChannelConfigForEnvironment(ChannelEnvironment env, double distance) {
     RealisticChannelConfig config = global_channel_config;
     config.distance = distance;
@@ -492,8 +494,8 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
                                    std::string previousModulation = "") {
 
     if (k <= 0 || k > 10000) {
-        NS_LOG_WARN("Invalid packet size: " << k << ", correcting to 64");
-        k = 64;
+        NS_LOG_WARN("Invalid packet size: " << k << ", correcting to " << global_packet_size << " bits");
+        k = global_packet_size;
     }
 
     if (snr_db < -10 || snr_db > 50) {
@@ -537,6 +539,7 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
     }
 
     json payload = {
+        {"type", "NS3_simulation"},
         {"id", static_cast<int>(flowId)},
         {"k", k},
         {"modulation", selectedModulation},
@@ -987,7 +990,7 @@ void ScheduleDynamicTransmissions() {
             }
 
             Simulator::Schedule(MilliSeconds(10), &SendToSionnaWithDynamicChannel,
-                              flowId, 64, current_data->snr_db, *current_data,
+                              flowId, global_packet_size, current_data->snr_db, *current_data,
                               prevThroughput, prevBER, prevBLER, prevModulation);
         } else {
             NS_LOG_WARN("No recent mobility data for Flow " << flowId);
@@ -1088,6 +1091,8 @@ int main(int argc, char* argv[])
     cmd.AddValue("ganDataFile", "Output file for GAN training data", ganDataFile);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("mobilityType", "Mobility type (0=STATIC, 1=LINEAR, 2=CIRCULAR, 3=RANDOM_WALK, 4=HIGHWAY, 5=URBAN_GRID)", mobilityType);
+    cmd.AddValue("packetSize", "Packet size for simulation", global_packet_size);
+
 
     cmd.Parse(argc, argv);
     global_mobility_config.type = static_cast<MobilityType>(mobilityType);
