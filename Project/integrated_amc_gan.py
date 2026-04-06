@@ -14,6 +14,7 @@ from pathlib import Path
 
 from gan_snr_predictor import SNRGan, GANConfig, SNRDataProcessor
 from amc_server import AdvancedQLearningAgent, json_serializable, safe_json_dumps
+from performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,9 @@ class IntegratedAMCServer:
         if not success:
             raise ValueError("Cannot start without proper preprocessing parameters")
 
+        # Initialize performance analyzer
+        self.analyzer = RealtimeAnalyzer(window_size=500)
+
         gan_config = GANConfig(
             history_len=self.preprocessor.history_len,
             aux_dim=3,
@@ -177,6 +181,7 @@ class IntegratedAMCServer:
 
     def process_modulation_request_with_prediction(self, request: Dict) -> Dict:
         try:
+            start_time = time.time()
             self.stats['total_requests'] += 1
 
             flow_id = request.get('flow_id', 1)
@@ -223,14 +228,43 @@ class IntegratedAMCServer:
                 self.stats['fallback_used'] += 1
                 logger.info(f"RL Agent fallback: {selected_modulation}")
 
+            gan_start_time = time.time()
             self._proactive_prediction_for_next_transmission(flow_id, channel_info)
+            gan_latency_ms = (time.time() - gan_start_time) * 1000
 
+            sionna_start = time.time()
             transmission_result = self._simulate_transmission(selected_modulation, current_snr, channel_info, flow_id)
+            sionna_latency_ms = (time.time() - sionna_start) * 1000
 
             self._handle_transmission_feedback(flow_id, transmission_result, selected_modulation, current_snr)
 
             flow_state['modulation_history'].append(selected_modulation)
             flow_state['feedback_history'].append(transmission_result)
+
+            decision_latency_ms = (time.time() - start_time) * 1000
+
+            # Record performance metrics
+            prediction_error = 0.0
+            if preselected:
+                prediction_error = abs(current_snr - preselected['predicted_snr'])
+            
+            metrics = PerformanceMetrics(
+                timestamp=time.time(),
+                flow_id=flow_id,
+                decision_method=decision_method,
+                predicted_snr=preselected['predicted_snr'] if preselected else current_snr,
+                actual_snr=current_snr,
+                prediction_error=prediction_error,
+                selected_modulation=selected_modulation,
+                ber=transmission_result.get('ber', 0.0),
+                bler=transmission_result.get('bler', 0.0),
+                throughput=transmission_result.get('throughput', 0.0),
+                decision_latency_ms=decision_latency_ms,
+                sionna_latency_ms=sionna_latency_ms,
+                gan_latency_ms=gan_latency_ms,
+                success=transmission_result.get('success', False)
+            )
+            self.analyzer.record_decision(metrics)
 
             response = {
                 'modulation': selected_modulation,
@@ -247,12 +281,18 @@ class IntegratedAMCServer:
                 'proactive_prediction': {
                     'next_prediction_initiated': True,
                     'flow_state_updated': True
+                },
+                'performance': {
+                    'decision_latency_ms': decision_latency_ms,
+                    'sionna_latency_ms': sionna_latency_ms,
+                    'gan_latency_ms': gan_latency_ms
                 }
             }
 
             logger.info(f"Flow {flow_id}: {selected_modulation} -> "
                         f"BER={transmission_result.get('ber', 0):.2e}, "
-                        f"Throughput={transmission_result.get('throughput', 0):.2f}Mbps")
+                        f"Throughput={transmission_result.get('throughput', 0):.2f}Mbps, "
+                        f"Latency={decision_latency_ms:.1f}ms")
 
             return response
         except Exception as e:
@@ -353,6 +393,7 @@ class IntegratedAMCServer:
             sock.connect((self.sionna_host, self.sionna_port))
 
             sionna_request = {
+                "type": "amc_server",
                 "id": flow_id,
                 "k": 1024,
                 "modulation": modulation,
