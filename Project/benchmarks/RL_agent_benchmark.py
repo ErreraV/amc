@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 
 # Add parent directory to path to import models
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from amc_server import AdvancedQLearningAgent
+from servers.amc_server import AdvancedQLearningAgent
 from sklearn.preprocessing import StandardScaler
 
 
@@ -342,7 +342,7 @@ class RLAgentBenchmark:
         
         return stats
     
-    def plot_histograms(self, output_dir: str = "benchmark_results") -> None:
+    def plot_histograms(self, output_dir: str = "results") -> None:
         """Generate benchmark histograms"""
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         
@@ -450,7 +450,7 @@ class RLAgentBenchmark:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         logger.info(f"Timeline plot saved to {output_path}")
     
-    def save_statistics(self, output_dir: str = "benchmark_results") -> None:
+    def save_statistics(self, output_dir: str = "results") -> None:
         """Save statistics to JSON file"""
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         
@@ -461,7 +461,7 @@ class RLAgentBenchmark:
             json.dump(stats, f, indent=2)
         logger.info(f"Statistics saved to {output_path}")
     
-    def run_complete_benchmark(self, output_dir: str = "benchmark_results") -> Dict:
+    def run_complete_benchmark(self, output_dir: str = "results") -> Dict:
         """Run complete benchmark suite including decision-making"""
         self.benchmark_inference()
         self.benchmark_decision_making()
@@ -480,12 +480,12 @@ def main():
     parser.add_argument('--use-compile', action='store_true', help='Use torch.compile for optimization')
     parser.add_argument('--compile-mode', choices=['reduce-overhead', 'reduce-peak-memory', 'default'],
                        default='reduce-overhead', help='torch.compile mode (default: reduce-overhead)')
-    parser.add_argument('--output-dir', default='benchmark_results', help='Output directory for results')
+    parser.add_argument('--output-dir', default='results', help='Output directory for results')
     
     args = parser.parse_args()
     
     # Path to checkpoint (optional)
-    checkpoint_path = Path(__file__).parent.parent / "rl_amc_model_safeguard1.pth"
+    checkpoint_path = Path(__file__).parent.parent / "models" / "rl" / "rl_amc_model_safeguard1.pth"
     
     # Create benchmark
     benchmark = RLAgentBenchmark(

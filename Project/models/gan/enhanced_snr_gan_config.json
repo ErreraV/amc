@@ -1,0 +1,35 @@
+{
+  "history_len": 15,
+  "aux_dim": 3,
+  "noise_dim": 16,
+  "gen_hidden_dims": [
+    128,
+    256,
+    128
+  ],
+  "gen_dropout": 0.2,
+  "gen_activation": "leaky_relu",
+  "disc_hidden_dims": [
+    128,
+    256,
+    128,
+    64
+  ],
+  "disc_dropout": 0.3,
+  "disc_activation": "leaky_relu",
+  "learning_rate_g": 0.0002,
+  "learning_rate_d": 0.0002,
+  "beta1": 0.5,
+  "beta2": 0.999,
+  "adversarial_weight": 1.0,
+  "l1_penalty_weight": 10.0,
+  "gradient_penalty_weight": 10.0,
+  "snr_min": -10.0,
+  "snr_max": 35.0,
+  "ensemble_samples": 100,
+  "ensemble_method": "median",
+  "device": "cpu",
+  "dtype": "torch.float32",
+  "enable_logging": true,
+  "log_frequency": 100
+}

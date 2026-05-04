@@ -12,9 +12,9 @@ from typing import Dict, Tuple, Optional
 from collections import deque, defaultdict
 from pathlib import Path
 
-from gan_snr_predictor import SNRGan, GANConfig, SNRDataProcessor
-from amc_server import AdvancedQLearningAgent, json_serializable, safe_json_dumps
-from performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
+from .gan_snr_predictor import SNRGan, GANConfig, SNRDataProcessor
+from ..servers.amc_server import AdvancedQLearningAgent, json_serializable, safe_json_dumps
+from .performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,9 @@ class ProductionPreprocessor:
         self.history_len = 15
         self.is_loaded = False
 
-    def load_training_preprocessing(self, preprocessing_file='enhanced_snr_preprocessing.pkl'):
+    def load_training_preprocessing(self, preprocessing_file=None):
+        if preprocessing_file is None:
+            preprocessing_file = str(Path(__file__).parent.parent.parent / 'data' / 'enhanced_snr_preprocessing.pkl')
         try:
             with open(preprocessing_file, 'rb') as f:
                 params = pickle.load(f)
@@ -91,7 +93,9 @@ class ProductionPreprocessor:
 
 
 class IntegratedAMCServer:
-    def __init__(self, host='127.0.0.1', port=9001, training_data_file='gan_training_data_enhanced.json'):
+    def __init__(self, host='127.0.0.1', port=9001, training_data_file=None):
+        if training_data_file is None:
+            training_data_file = str(Path(__file__).parent.parent.parent / 'data' / 'gan_training_data_enhanced.json')
         self.host = host
         self.port = port
 
@@ -121,7 +125,7 @@ class IntegratedAMCServer:
         )
 
         try:
-            enhanced_model_path = "enhanced_snr_gan.pth"
+            enhanced_model_path = str(Path(__file__).parent.parent.parent / 'models' / 'gan' / 'enhanced_snr_gan.pth')
             try:
                 self.gan.load(enhanced_model_path)
                 logger.info(f"Loaded enhanced GAN model: {enhanced_model_path}")
@@ -146,7 +150,7 @@ class IntegratedAMCServer:
             'predictions_accurate': 0,
             'fallback_used': 0,
             'denormalization_errors': 0,
-            'model_used': 'enhanced_snr_gan.pth'
+            'model_used': str(Path(__file__).parent.parent.parent / 'models' / 'gan' / 'enhanced_snr_gan.pth')
         }
 
         logger.info(f"Integrated AMC Server initialized on {host}:{port}")
@@ -541,7 +545,7 @@ class IntegratedAMCServer:
 
     def save_models_with_enhanced_name(self):
         try:
-            enhanced_path = "enhanced_snr_gan.pth"
+            enhanced_path = str(Path(__file__).parent.parent.parent / 'models' / 'gan' / 'enhanced_snr_gan.pth')
             self.gan.save(enhanced_path)
             logger.info(f"Enhanced GAN model saved: {enhanced_path}")
             self.rl_agent.save_model()
@@ -599,14 +603,15 @@ def main():
         format='[%(asctime)s] %(levelname)s - %(message)s'
     )
 
-    training_data_file = 'gan_training_data_enhanced.json'
+    training_data_file = str(Path(__file__).parent.parent.parent / 'data' / 'gan_training_data_enhanced.json')
+    preprocessing_file = str(Path(__file__).parent.parent.parent / 'data' / 'enhanced_snr_preprocessing.pkl')
 
     if not Path(training_data_file).exists():
         logger.warning(f"Training data file '{training_data_file}' not found.")
         training_data_file = None
 
-    if not Path('enhanced_snr_preprocessing.pkl').exists():
-        logger.error("Preprocessing file 'enhanced_snr_preprocessing.pkl' not found. Exiting.")
+    if not Path(preprocessing_file).exists():
+        logger.error(f"Preprocessing file '{preprocessing_file}' not found. Exiting.")
         return
 
     server = IntegratedAMCServer(

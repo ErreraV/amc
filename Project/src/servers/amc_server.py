@@ -16,6 +16,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from typing import Dict, List, Tuple, Optional, Any
 import random
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -490,6 +491,10 @@ class AdvancedQLearningAgent:
         }
 
     def save_model(self, filename: str = "rl_amc_model_safeguard1.pth"):
+        # Use models/rl/ directory if relative path is given
+        if not Path(filename).is_absolute():
+            filename = str(Path(__file__).parent.parent.parent / 'models' / 'rl' / filename)
+        
         torch.save({
             'q_network_state_dict': self.q_network.state_dict(),
             'target_network_state_dict': self.target_network.state_dict(),
@@ -511,6 +516,10 @@ class AdvancedQLearningAgent:
 
     def load_model(self, filename: str = "rl_amc_model_safeguard1.pth") -> bool:
         try:
+            # Use models/rl/ directory if relative path is given
+            if not Path(filename).is_absolute():
+                filename = str(Path(__file__).parent.parent.parent / 'models' / 'rl' / filename)
+            
             checkpoint = torch.load(filename, map_location=self.device, weights_only=False)
             self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
             self.target_network.load_state_dict(checkpoint['target_network_state_dict'])

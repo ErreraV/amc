@@ -23,13 +23,13 @@ def main():
     logger.info("AMC Server with Real-Time Histogram Dashboard")
     logger.info("=" * 60)
     
-    # Check required files
+    # Check required files (in data directory)
     required_files = [
-        'enhanced_snr_preprocessing.pkl',
+        Path(__file__).parent.parent.parent / 'data' / 'enhanced_snr_preprocessing.pkl',
     ]
     
     for fname in required_files:
-        if not Path(fname).exists():
+        if not fname.exists():
             logger.error(f"❌ Required file not found: {fname}")
             return 1
     
@@ -37,15 +37,14 @@ def main():
     
     try:
         # Import after checking files
-        from integrated_amc_gan import IntegratedAMCServer
-        from dashboard import run_dashboard
+        from ..amc.integrated_amc_gan import IntegratedAMCServer
+        from ..servers.dashboard import run_dashboard
         
         # Create AMC server
         logger.info("Initializing integrated AMC server...")
         server = IntegratedAMCServer(
             host='127.0.0.1',
-            port=9001,
-            training_data_file='gan_training_data_enhanced.json'
+            port=9001
         )
         logger.info("✓ AMC Server initialized")
         

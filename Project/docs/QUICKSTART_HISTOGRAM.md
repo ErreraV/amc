@@ -3,21 +3,21 @@
 ## Installation (One-time)
 
 ```bash
-cd /home/ehg2004/amc_/Project
+cd /home/errera/tn/pidr-kd-gan/src/amc_/Project
 
 # Install Flask if not already installed
 pip install flask flask-cors
 
 # Verify required files exist
-ls enhanced_snr_preprocessing.pkl  # Should exist
-ls enhanced_snr_gan.pth            # Optional, has fallback
+ls data/enhanced_snr_preprocessing.pkl  # Should exist
+ls models/gan/enhanced_snr_gan.pth      # Optional, has fallback
 ```
 
 ## Start the System
 
 ### Option 1: Full System (Recommended)
 ```bash
-python3 run_amc_with_analytics.py
+python3 src/runners/run_amc_with_analytics.py
 ```
 
 This will:
@@ -41,7 +41,7 @@ Output shows ASCII histograms + statistics
 
 ### Option 3: Dashboard Only (if AMC server already running)
 ```bash
-python3 dashboard.py
+python3 src/servers/dashboard.py
 ```
 
 ---

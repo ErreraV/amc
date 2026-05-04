@@ -6,7 +6,7 @@ Flask dashboard for real-time latency visualization
 from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
 import threading
-from performance_analyzer import RealtimeAnalyzer
+from ..amc.performance_analyzer import RealtimeAnalyzer
 
 app = Flask(__name__)
 CORS(app)
