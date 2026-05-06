@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from typing import Dict, List, Tuple, Optional, Any
 import random
 from pathlib import Path
+from ..event_publisher.event_publisher import EventPublisher
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -556,6 +557,7 @@ class RLAMCServer:
         self.session_start = time.time()
         self.total_requests = 0
         self.training_mode = True
+        self.event_publisher = EventPublisher()
 
         self.sionna_stats = {
             'total_calls': 0,
@@ -738,6 +740,7 @@ class RLAMCServer:
 
     def process_modulation_request(self, request: Dict) -> Dict:
         try:
+            request_time = time.time()
             snr = request.get('snr', 20.0)
             flow_id = request.get('flow_id', 1)
             feedback = request.get('feedback', None)
@@ -858,6 +861,31 @@ class RLAMCServer:
             logger.info(f"[AMC] Decision: {modulation} | T={sionna_result['throughput']:.2f}Mbps | "
                         f"BER={sionna_result['ber']:.2e} | BLER={sionna_result['bler']:.3f} | "
                         f"Success={sionna_result['success']} | Safe={response['safety_info']['action_was_safe']}")
+
+            # Publish event to metrics server
+            event = {
+                'run_id': getattr(self, '_run_id', 'run-default'),
+                'config_id': getattr(self, '_config_id', 'cfg-rl-only'),
+                'model_mode': 'rl_only',
+                'model_name': 'RL AMC',
+                'timestamp': time.time(),
+                'flow_id': flow_id,
+                'request_id': f"{flow_id}-{flow_state['packet_count']}",
+                'snr': snr,
+                'channel_info': channel_info,
+                'chosen_modulation': modulation,
+                'decision_method': 'rl',
+                'safety_validated': response['safety_info']['action_was_safe'],
+                'prediction_error': 0.0,
+                'decision_latency_ms': (time.time() - request_time) * 1000 if 'request_time' in locals() else 0.0,
+                'sionna_latency_ms': sionna_result.get('processing_time_ms', 0.0),
+                'gan_latency_ms': 0.0,
+                'ber': sionna_result['ber'],
+                'bler': sionna_result['bler'],
+                'throughput': sionna_result['throughput'],
+                'success': sionna_result['success'],
+            }
+            self.event_publisher.publish(event)
 
             return response
 

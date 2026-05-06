@@ -38,7 +38,21 @@ def main():
     try:
         # Import after checking files
         from ..amc.integrated_amc_gan import IntegratedAMCServer
+        from ..metrics_publisher.metrics_server import run_metrics_server
         from ..servers.dashboard import run_dashboard
+
+        # Start metrics server in background thread
+        logger.info("Starting metrics server on port 5001...")
+        metrics_thread = threading.Thread(
+            target=lambda: run_metrics_server(
+                host='127.0.0.1',
+                port=5001
+            ),
+            daemon=True
+        )
+        metrics_thread.start()
+        time.sleep(1)
+        logger.info("✓ Metrics server started")
         
         # Create AMC server
         logger.info("Initializing integrated AMC server...")
@@ -68,6 +82,7 @@ def main():
         logger.info("🎯 Services Running:")
         logger.info("")
         logger.info("  📊 Dashboard URL:     http://localhost:5000")
+        logger.info("  📡 Metrics Server:    http://127.0.0.1:5001")
         logger.info("  🔌 AMC Server:        127.0.0.1:9001")
         logger.info("  📈 Sionna Expected:   127.0.0.1:9000")
         logger.info("")

@@ -15,6 +15,7 @@ from pathlib import Path
 from .gan_snr_predictor import SNRGan, GANConfig, SNRDataProcessor
 from ..servers.amc_server import AdvancedQLearningAgent, json_serializable, safe_json_dumps
 from .performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
+from ..event_publisher.event_publisher import EventPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,7 @@ class IntegratedAMCServer:
         self.sionna_host = '127.0.0.1'
         self.sionna_port = 9000
         self.prediction_threshold = 3.0
+        self.event_publisher = EventPublisher()
 
         self.stats = {
             'total_requests': 0,
@@ -297,6 +299,31 @@ class IntegratedAMCServer:
                         f"BER={transmission_result.get('ber', 0):.2e}, "
                         f"Throughput={transmission_result.get('throughput', 0):.2f}Mbps, "
                         f"Latency={decision_latency_ms:.1f}ms")
+
+            # Publish event to metrics server
+            event = {
+                'run_id': getattr(self, '_run_id', 'run-default'),
+                'config_id': getattr(self, '_config_id', 'cfg-integrated'),
+                'model_mode': 'integrated_gan_rl',
+                'model_name': 'Integrated AMC (GAN+RL)',
+                'timestamp': time.time(),
+                'flow_id': flow_id,
+                'request_id': f"{flow_id}-{int(flow_state['packet_count'])}",
+                'snr': current_snr,
+                'channel_info': channel_info,
+                'chosen_modulation': selected_modulation,
+                'decision_method': decision_method,
+                'safety_validated': self._validate_modulation_safety(selected_modulation, current_snr),
+                'prediction_error': prediction_error,
+                'decision_latency_ms': decision_latency_ms,
+                'sionna_latency_ms': sionna_latency_ms,
+                'gan_latency_ms': gan_latency_ms,
+                'ber': transmission_result.get('ber', 0.0),
+                'bler': transmission_result.get('bler', 0.0),
+                'throughput': transmission_result.get('throughput', 0.0),
+                'success': transmission_result.get('success', False),
+            }
+            self.event_publisher.publish(event)
 
             return response
         except Exception as e:

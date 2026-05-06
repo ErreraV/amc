@@ -1,1 +1,3 @@
 /Project/performance_metrics.json
+**/__pycache__/
+**/*.pyc

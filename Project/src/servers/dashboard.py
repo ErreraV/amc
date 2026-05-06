@@ -6,6 +6,7 @@ Flask dashboard for real-time latency visualization
 from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
 import threading
+import requests
 from ..amc.performance_analyzer import RealtimeAnalyzer
 
 app = Flask(__name__)
@@ -32,28 +33,40 @@ def dashboard():
 def get_realtime_stats():
     """Live performance metrics"""
     window = request.args.get('window', 50, type=int)
-    if analyzer_instance is None:
-        return jsonify({'error': 'Analyzer not initialized'}), 503
-    stats = analyzer_instance.get_real_time_stats(window)
-    return jsonify(stats)
+    try:
+        r = requests.get(f'http://127.0.0.1:5001/api/realtime-stats?window={window}', timeout=1.0)
+        return (r.content, r.status_code, r.headers.items())
+    except Exception:
+        if analyzer_instance is None:
+            return jsonify({'error': 'Analyzer not initialized'}), 503
+        stats = analyzer_instance.get_real_time_stats(window)
+        return jsonify(stats)
 
 
 @app.route('/api/latency-histograms', methods=['GET'])
 def get_latency_histograms():
     """Get latency histograms for all latency types"""
-    if analyzer_instance is None:
-        return jsonify({'error': 'Analyzer not initialized'}), 503
-    histograms = analyzer_instance.get_latency_histograms()
-    return jsonify(histograms)
+    try:
+        r = requests.get('http://127.0.0.1:5001/api/latency-histograms', timeout=1.0)
+        return (r.content, r.status_code, r.headers.items())
+    except Exception:
+        if analyzer_instance is None:
+            return jsonify({'error': 'Analyzer not initialized'}), 503
+        histograms = analyzer_instance.get_latency_histograms()
+        return jsonify(histograms)
 
 
 @app.route('/api/latency-breakdown', methods=['GET'])
 def get_latency_breakdown():
     """Get latency breakdown analysis"""
-    if analyzer_instance is None:
-        return jsonify({'error': 'Analyzer not initialized'}), 503
-    breakdown = analyzer_instance.get_latency_breakdown()
-    return jsonify(breakdown)
+    try:
+        r = requests.get('http://127.0.0.1:5001/api/latency-breakdown', timeout=1.0)
+        return (r.content, r.status_code, r.headers.items())
+    except Exception:
+        if analyzer_instance is None:
+            return jsonify({'error': 'Analyzer not initialized'}), 503
+        breakdown = analyzer_instance.get_latency_breakdown()
+        return jsonify(breakdown)
 
 
 @app.route('/api/flow/<int:flow_id>/stats', methods=['GET'])
@@ -100,6 +113,16 @@ HTML_TEMPLATE = '''
             margin-bottom: 30px;
             font-size: 2.5em;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .model-indicator {
+            text-align: center;
+            margin-top: -18px;
+            margin-bottom: 22px;
+            color: white;
+            font-size: 1.05em;
+            font-weight: 600;
+            letter-spacing: 0.3px;
         }
         
         .metrics-grid {
@@ -209,6 +232,7 @@ HTML_TEMPLATE = '''
 <body>
     <div class="container">
         <h1>📊 AMC Real-Time Performance Dashboard</h1>
+        <div class="model-indicator">Active Model: <span id="modelName">waiting for data...</span></div>
         
         <!-- Key Metrics -->
         <div class="metrics-grid" id="metricsGrid">
@@ -349,6 +373,10 @@ HTML_TEMPLATE = '''
                     (stats.success_rate * 100).toFixed(1);
                 document.getElementById('bler').textContent = 
                     stats.avg_bler.toFixed(4);
+
+                if (stats.current_model && stats.current_model.name) {
+                    document.getElementById('modelName').textContent = stats.current_model.name;
+                }
                 
                 // Update decision latency histogram
                 if (histograms.decision_latency) {
