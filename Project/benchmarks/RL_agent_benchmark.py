@@ -157,6 +157,11 @@ class RLAgentBenchmark:
         """Run inference benchmark"""
         logger.info(f"Starting RL Agent inference benchmark ({self.num_iterations} iterations)")
         
+        # Warn if iteration count is very high
+        if self.num_iterations > 5000:
+            logger.warning(f"⚠️  High iteration count ({self.num_iterations}) may cause GPU memory exhaustion")
+            logger.warning("   Consider reducing to 1000-2000 for stable long-term benchmarking")
+        
         torch.cuda.empty_cache() if self.device.type == 'cuda' else None
         time.sleep(0.5)  # Stabilize resources
         
@@ -207,6 +212,11 @@ class RLAgentBenchmark:
     def benchmark_decision_making(self) -> None:
         """Benchmark complete decision-making process including action selection"""
         logger.info(f"Starting RL Agent decision-making benchmark ({self.num_iterations} iterations)")
+        
+        # Warn if iteration count is very high
+        if self.num_iterations > 5000:
+            logger.warning(f"⚠️  High iteration count ({self.num_iterations}) may cause GPU memory exhaustion")
+            logger.warning("   Consider reducing to 1000-2000 for stable long-term benchmarking")
         
         torch.cuda.empty_cache() if self.device.type == 'cuda' else None
         time.sleep(0.5)
@@ -346,53 +356,149 @@ class RLAgentBenchmark:
         """Generate benchmark histograms"""
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig = plt.figure(figsize=(16, 12))
         fig.suptitle('RL Agent Model Benchmark Results', fontsize=16, fontweight='bold')
         
-        # 1. Inference Time Histogram
-        ax = axes[0, 0]
+        # Create grid for better layout
+        gs = fig.add_gridspec(3, 2, hspace=0.35, wspace=0.3)
+        
+        # ===== INFERENCE TIME ANALYSIS =====
         times = np.array(self.metrics['inference_times'])
-        ax.hist(times, bins=30, color='steelblue', edgecolor='black', alpha=0.7)
-        ax.axvline(np.mean(times), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(times):.4f}ms')
-        ax.axvline(np.median(times), color='green', linestyle='--', linewidth=2, label=f'Median: {np.median(times):.4f}ms')
-        ax.set_xlabel('Inference Time (ms)', fontsize=11)
-        ax.set_ylabel('Frequency', fontsize=11)
-        ax.set_title('Inference Time Distribution', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
+        warmup_iterations = min(10, len(times) // 10)  # Skip first 10% or 10 iterations, whichever is smaller
+        times_stable = times[warmup_iterations:] if len(times) > warmup_iterations else times
         
-        # 2. CPU Memory Usage
-        ax = axes[0, 1]
-        rss_mem = self.metrics['memory_cpu']['rss_mb']
-        ax.hist(rss_mem, bins=30, color='coral', edgecolor='black', alpha=0.7)
-        ax.axvline(np.mean(rss_mem), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(rss_mem):.1f}MB')
-        ax.set_xlabel('Memory Usage (MB)', fontsize=11)
-        ax.set_ylabel('Frequency', fontsize=11)
-        ax.set_title('CPU Memory Distribution', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
+        # 1. Inference Time Histogram (with warmup)
+        ax1 = fig.add_subplot(gs[0, 0])
+        # Use Freedman-Diaconis rule for bin size
+        if len(times_stable) > 1:
+            iqr = np.percentile(times_stable, 75) - np.percentile(times_stable, 25)
+            bin_width = 2 * iqr / (len(times_stable) ** (1/3)) if iqr > 0 else 1
+            num_bins = max(10, int((times_stable.max() - times_stable.min()) / bin_width)) if bin_width > 0 else 30
+        else:
+            num_bins = 10
+            
+        ax1.hist(times_stable, bins=num_bins, color='steelblue', edgecolor='black', alpha=0.7, label='Stable runs')
+        ax1.axvline(np.mean(times_stable), color='red', linestyle='--', linewidth=2.5, label=f'Mean: {np.mean(times_stable):.3f}ms')
+        ax1.axvline(np.median(times_stable), color='green', linestyle='--', linewidth=2.5, label=f'Median: {np.median(times_stable):.3f}ms')
+        if len(times_stable) > 0:
+            p95 = np.percentile(times_stable, 95)
+            ax1.axvline(p95, color='orange', linestyle=':', linewidth=2, label=f'P95: {p95:.3f}ms')
+            
+            # Adaptive x-axis limiting
+            p99 = np.percentile(times_stable, 99)
+            xlim_max = min(p99 * 1.5, times_stable.max())
+            outliers_beyond = np.sum(times_stable > xlim_max)
+            
+            ax1.set_xlim(left=0, right=xlim_max)
+            if outliers_beyond > 0:
+                outlier_pct = 100 * outliers_beyond / len(times_stable)
+                ax1.text(0.98, 0.97, f'{outliers_beyond} outliers beyond axis\n({outlier_pct:.1f}%)', 
+                        transform=ax1.transAxes, fontsize=8, verticalalignment='top', 
+                        horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.7))
         
-        # 3. Q-Values Distribution
-        ax = axes[1, 0]
+        ax1.set_xlabel('Inference Time (ms)', fontsize=11)
+        ax1.set_ylabel('Frequency', fontsize=11)
+        ax1.set_title(f'Inference Time Distribution (Stable: iterations {warmup_iterations+1}-{len(times)})', fontsize=12, fontweight='bold')
+        ax1.legend(fontsize=9)
+        ax1.grid(alpha=0.3)
+        
+        # 2. Log-scale Histogram for full range
+        ax2 = fig.add_subplot(gs[0, 1])
+        ax2.hist(times, bins=30, color='skyblue', edgecolor='black', alpha=0.7, label='All runs')
+        ax2.axvline(np.mean(times), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(times):.3f}ms')
+        ax2.set_xlabel('Inference Time (ms)', fontsize=11)
+        ax2.set_ylabel('Frequency (log scale)', fontsize=11)
+        ax2.set_yscale('log')
+        ax2.set_title('Inference Time Distribution (Log Scale, All Iterations)', fontsize=12, fontweight='bold')
+        ax2.legend(fontsize=9)
+        ax2.grid(alpha=0.3, which='both')
+        
+        # 3. Box Plot Comparison
+        ax3 = fig.add_subplot(gs[1, 0])
+        box_data = [times[:warmup_iterations], times_stable] if warmup_iterations > 0 else [times_stable]
+        labels = ['Warmup', 'Stable'] if warmup_iterations > 0 else ['Stable']
+        bp = ax3.boxplot(box_data, patch_artist=True, widths=0.5)
+        ax3.set_xticks(range(1, len(labels) + 1))
+        ax3.set_xticklabels(labels)
+        colors = ['lightcoral', 'lightgreen'] if warmup_iterations > 0 else ['lightgreen']
+        for patch, color in zip(bp['boxes'], colors):
+            patch.set_facecolor(color)
+        ax3.set_ylabel('Inference Time (ms)', fontsize=11)
+        ax3.set_title('Warmup vs. Stable Performance Comparison', fontsize=12, fontweight='bold')
+        ax3.grid(alpha=0.3, axis='y')
+        
+        # Add statistics text
+        if warmup_iterations > 0:
+            stats_text = f"Warmup ({warmup_iterations}): {np.mean(times[:warmup_iterations]):.2f}ms\nStable ({len(times_stable)}): {np.mean(times_stable):.2f}ms"
+        else:
+            stats_text = f"Stable ({len(times_stable)}): {np.mean(times_stable):.2f}ms"
+        ax3.text(0.98, 0.97, stats_text, transform=ax3.transAxes, fontsize=9, verticalalignment='top', 
+                horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        # 4. CPU Memory Usage
+        ax4 = fig.add_subplot(gs[1, 1])
+        rss_mem = np.array(self.metrics['memory_cpu']['rss_mb'])
+        mem_variation = rss_mem.max() - rss_mem.min() if len(rss_mem) > 0 else 0
+        
+        if mem_variation > 0.1:
+            ax4.hist(rss_mem, bins=20, color='coral', edgecolor='black', alpha=0.7)
+            ax4.axvline(np.mean(rss_mem), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(rss_mem):.1f}MB')
+            ax4.set_xlabel('Memory Usage (MB)', fontsize=11)
+            ax4.set_ylabel('Frequency', fontsize=11)
+            ax4.set_title('CPU Memory Distribution', fontsize=12, fontweight='bold')
+            ax4.legend(fontsize=9)
+            ax4.grid(alpha=0.3)
+        else:
+            ax4.axis('off')
+            if len(rss_mem) > 0:
+                summary = f"CPU Memory Usage Summary:\nMean:     {np.mean(rss_mem):>8.2f} MB\nStd:      {np.std(rss_mem):>8.4f} MB\nMin:      {rss_mem.min():>8.2f} MB\nMax:      {rss_mem.max():>8.2f} MB\nVariation: {mem_variation:>6.2f} MB\n\nNote: Minimal variation detected"
+                ax4.text(0.5, 0.5, summary, fontsize=10, family='monospace', verticalalignment='center', horizontalalignment='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            ax4.set_title('CPU Memory Distribution', fontsize=12, fontweight='bold')
+        
+        # 5. Q-Values Distribution
+        ax5 = fig.add_subplot(gs[2, 0])
         q_vals = np.array(self.metrics['q_values'])
-        ax.hist(q_vals, bins=30, color='lightgreen', edgecolor='black', alpha=0.7)
-        ax.axvline(np.mean(q_vals), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(q_vals):.4f}')
-        ax.set_xlabel('Q-Value', fontsize=11)
-        ax.set_ylabel('Frequency', fontsize=11)
-        ax.set_title('Q-Values Distribution', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
+        q_variation = q_vals.max() - q_vals.min() if len(q_vals) > 0 else 0
         
-        # 4. CPU Usage Percentage
-        ax = axes[1, 1]
-        cpu_usage = self.metrics['cpu_percent']
-        ax.hist(cpu_usage, bins=30, color='lightyellow', edgecolor='black', alpha=0.7)
-        ax.axvline(np.mean(cpu_usage), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(cpu_usage):.2f}%')
-        ax.set_xlabel('CPU Usage (%)', fontsize=11)
-        ax.set_ylabel('Frequency', fontsize=11)
-        ax.set_title('CPU Usage Distribution', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
+        if q_variation > 0.001:
+            if len(q_vals) > 1:
+                q_iqr = np.percentile(q_vals, 75) - np.percentile(q_vals, 25)
+                q_bin_width = 2 * q_iqr / (len(q_vals) ** (1/3)) if q_iqr > 0 else 1
+                q_num_bins = max(10, int((q_vals.max() - q_vals.min()) / q_bin_width)) if q_bin_width > 0 else 30
+            else:
+                q_num_bins = 10
+            ax5.hist(q_vals, bins=q_num_bins, color='lightgreen', edgecolor='black', alpha=0.7)
+            ax5.axvline(np.mean(q_vals), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(q_vals):.4f}')
+            ax5.set_xlabel('Q-Value', fontsize=11)
+            ax5.set_ylabel('Frequency', fontsize=11)
+            ax5.set_title('Q-Values Distribution', fontsize=12, fontweight='bold')
+            ax5.legend(fontsize=9)
+            ax5.grid(alpha=0.3)
+        else:
+            ax5.axis('off')
+            if len(q_vals) > 0:
+                summary = f"Q-Values Summary:\nMean:     {np.mean(q_vals):>8.4f}\nStd:      {np.std(q_vals):>8.4f}\nMin:      {q_vals.min():>8.4f}\nMax:      {q_vals.max():>8.4f}\nVariation: {q_variation:>6.4f}\n\nNote: Minimal variation detected"
+                ax5.text(0.5, 0.5, summary, fontsize=10, family='monospace', verticalalignment='center', horizontalalignment='center', bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.5))
+            ax5.set_title('Q-Values Distribution', fontsize=12, fontweight='bold')
+
+        # 6. CPU Usage Percentage
+        ax6 = fig.add_subplot(gs[2, 1])
+        cpu_usage = np.array(self.metrics['cpu_percent'])
+        if len(cpu_usage) > 1:
+            cpu_iqr = np.percentile(cpu_usage, 75) - np.percentile(cpu_usage, 25)
+            cpu_bin_width = 2 * cpu_iqr / (len(cpu_usage) ** (1/3)) if cpu_iqr > 0 else 5
+            cpu_num_bins = max(8, int((cpu_usage.max() - cpu_usage.min()) / cpu_bin_width)) if cpu_bin_width > 0 else 30
+        else:
+            cpu_num_bins = 10
+            
+        ax6.hist(cpu_usage, bins=cpu_num_bins, color='lightyellow', edgecolor='black', alpha=0.7)
+        ax6.axvline(np.mean(cpu_usage), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(cpu_usage):.2f}%')
+        ax6.axvline(np.median(cpu_usage), color='green', linestyle='--', linewidth=2, label=f'Median: {np.median(cpu_usage):.2f}%')
+        ax6.set_xlabel('CPU Usage (%)', fontsize=11)
+        ax6.set_ylabel('Frequency', fontsize=11)
+        ax6.set_title('CPU Usage Distribution', fontsize=12, fontweight='bold')
+        ax6.legend(fontsize=9)
+        ax6.grid(alpha=0.3)
         
         plt.tight_layout()
         
@@ -406,48 +512,64 @@ class RLAgentBenchmark:
     
     def _plot_timeline(self, output_dir: str) -> None:
         """Plot performance metrics over time"""
-        fig, axes = plt.subplots(3, 1, figsize=(14, 10))
-        fig.suptitle('RL Agent Model Performance Over Time', fontsize=16, fontweight='bold')
-        
-        iterations = np.arange(self.num_iterations)
-        
-        # Inference time timeline
-        ax = axes[0]
-        ax.plot(iterations, self.metrics['inference_times'], linewidth=1, alpha=0.7, color='steelblue')
-        rolling_mean = np.convolve(self.metrics['inference_times'], np.ones(10)/10, mode='valid')
-        ax.plot(range(9, len(self.metrics['inference_times'])), rolling_mean, linewidth=2, color='red', label='10-iter MA')
-        ax.set_ylabel('Time (ms)', fontsize=11)
-        ax.set_title('Inference Time Over Iterations', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
-        
-        # Memory and Q-value timeline
-        ax = axes[1]
-        ax.plot(iterations, self.metrics['memory_cpu']['rss_mb'], linewidth=1, alpha=0.7, color='coral', label='CPU Memory')
-        ax2 = ax.twinx()
-        ax2.plot(iterations, self.metrics['q_values'], linewidth=1, alpha=0.7, color='lightgreen', label='Q-Value')
-        ax.set_ylabel('Memory (MB)', fontsize=11, color='coral')
-        ax2.set_ylabel('Q-Value', fontsize=11, color='lightgreen')
-        ax.set_title('Memory and Q-Values Over Iterations', fontsize=12, fontweight='bold')
-        ax.grid(alpha=0.3)
-        ax.legend(loc='upper left')
-        ax2.legend(loc='upper right')
-        
-        # CPU usage timeline
-        ax = axes[2]
-        ax.plot(iterations, self.metrics['cpu_percent'], linewidth=1, alpha=0.7, color='lightyellow')
-        rolling_mean_cpu = np.convolve(self.metrics['cpu_percent'], np.ones(10)/10, mode='valid')
-        ax.plot(range(9, len(self.metrics['cpu_percent'])), rolling_mean_cpu, linewidth=2, color='red', label='10-iter MA')
-        ax.set_xlabel('Iteration', fontsize=11)
-        ax.set_ylabel('CPU Usage (%)', fontsize=11)
-        ax.set_title('CPU Usage Over Iterations', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
-        
-        plt.tight_layout()
-        
-        output_path = Path(output_dir) / 'rl_agent_performance_timeline.png'
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        try:
+            # Use actual data length, not expected num_iterations (in case of early termination)
+            actual_iterations = len(self.metrics['inference_times'])
+            
+            if actual_iterations < 2:
+                logger.warning("Not enough data points to plot timeline (minimum 2 required)")
+                return
+            
+            fig, axes = plt.subplots(3, 1, figsize=(14, 10))
+            fig.suptitle('RL Agent Model Performance Over Time', fontsize=16, fontweight='bold')
+            
+            iterations = np.arange(actual_iterations)
+            
+            # Inference time timeline
+            ax = axes[0]
+            ax.plot(iterations, self.metrics['inference_times'], linewidth=1, alpha=0.7, color='steelblue')
+            if actual_iterations > 10:
+                rolling_mean = np.convolve(self.metrics['inference_times'], np.ones(10)/10, mode='valid')
+                ax.plot(range(9, len(self.metrics['inference_times'])), rolling_mean, linewidth=2, color='red', label='10-iter MA')
+            ax.set_ylabel('Time (ms)', fontsize=11)
+            ax.set_title('Inference Time Over Iterations', fontsize=12, fontweight='bold')
+            ax.legend()
+            ax.grid(alpha=0.3)
+            
+            # Memory and Q-value timeline
+            ax = axes[1]
+            cpu_mem = np.array(self.metrics['memory_cpu']['rss_mb'])[:actual_iterations]
+            q_values = np.array(self.metrics['q_values'])[:actual_iterations]
+            ax.plot(iterations, cpu_mem, linewidth=1, alpha=0.7, color='coral', label='CPU Memory')
+            ax2 = ax.twinx()
+            ax2.plot(iterations, q_values, linewidth=1, alpha=0.7, color='lightgreen', label='Q-Value')
+            ax.set_ylabel('Memory (MB)', fontsize=11, color='coral')
+            ax2.set_ylabel('Q-Value', fontsize=11, color='lightgreen')
+            ax.set_title('Memory and Q-Values Over Iterations', fontsize=12, fontweight='bold')
+            ax.grid(alpha=0.3)
+            ax.legend(loc='upper left')
+            ax2.legend(loc='upper right')
+            
+            # CPU usage timeline
+            ax = axes[2]
+            cpu_usage = np.array(self.metrics['cpu_percent'])[:actual_iterations]
+            ax.plot(iterations, cpu_usage, linewidth=1, alpha=0.7, color='lightyellow')
+            if actual_iterations > 10:
+                rolling_mean_cpu = np.convolve(cpu_usage, np.ones(10)/10, mode='valid')
+                ax.plot(range(9, len(cpu_usage)), rolling_mean_cpu, linewidth=2, color='red', label='10-iter MA')
+            ax.set_xlabel('Iteration', fontsize=11)
+            ax.set_ylabel('CPU Usage (%)', fontsize=11)
+            ax.set_title('CPU Usage Over Iterations', fontsize=12, fontweight='bold')
+            ax.legend()
+            ax.grid(alpha=0.3)
+            
+            plt.tight_layout()
+            
+            output_path = Path(output_dir) / 'rl_agent_performance_timeline.png'
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            logger.info(f"Timeline plot saved to {output_path}")
+        except Exception as e:
+            logger.warning(f"Could not generate timeline plot: {e}")
         logger.info(f"Timeline plot saved to {output_path}")
     
     def save_statistics(self, output_dir: str = "benchmark_results") -> None:

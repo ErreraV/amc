@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import warnings
 
+import os
+os.environ['TORCH_HIP_USE_DEVICE_ASSERT'] = '1'
+
 warnings.filterwarnings('ignore')
 
 # Setup logging
@@ -339,7 +342,21 @@ class GANBenchmark:
         ax1.hist(times_stable, bins=num_bins, color='steelblue', edgecolor='black', alpha=0.7, label='Stable runs')
         ax1.axvline(np.mean(times_stable), color='red', linestyle='--', linewidth=2.5, label=f'Mean: {np.mean(times_stable):.3f}ms')
         ax1.axvline(np.median(times_stable), color='green', linestyle='--', linewidth=2.5, label=f'Median: {np.median(times_stable):.3f}ms')
-        ax1.axvline(np.percentile(times_stable, 95), color='orange', linestyle=':', linewidth=2, label=f'P95: {np.percentile(times_stable, 95):.3f}ms')
+        p95 = np.percentile(times_stable, 95)
+        ax1.axvline(p95, color='orange', linestyle=':', linewidth=2, label=f'P95: {p95:.3f}ms')
+        
+        # Adaptive x-axis limiting: focus on main distribution, mark outliers
+        p99 = np.percentile(times_stable, 99)
+        xlim_max = min(p99 * 1.5, times_stable.max())  # Use P99 + 50% margin, capped at max
+        outliers_beyond = np.sum(times_stable > xlim_max)
+        
+        ax1.set_xlim(left=0, right=xlim_max)
+        if outliers_beyond > 0:
+            outlier_pct = 100 * outliers_beyond / len(times_stable)
+            ax1.text(0.98, 0.97, f'{outliers_beyond} outliers beyond axis\n({outlier_pct:.1f}%)', 
+                    transform=ax1.transAxes, fontsize=8, verticalalignment='top', 
+                    horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.7))
+        
         ax1.set_xlabel('Inference Time (ms)', fontsize=11)
         ax1.set_ylabel('Frequency', fontsize=11)
         ax1.set_title(f'Inference Time Distribution (Stable: iterations {warmup_iterations+1}-{len(times)})', fontsize=12, fontweight='bold')
@@ -459,46 +476,61 @@ Note: GPU memory nearly constant"""
     
     def _plot_timeline(self, output_dir: str) -> None:
         """Plot performance metrics over time"""
-        fig, axes = plt.subplots(3, 1, figsize=(14, 10))
-        fig.suptitle('GAN Model Performance Over Time', fontsize=16, fontweight='bold')
-        
-        iterations = np.arange(self.num_iterations)
-        
-        # Inference time timeline
-        ax = axes[0]
-        ax.plot(iterations, self.metrics['inference_times'], linewidth=1, alpha=0.7, color='steelblue')
-        rolling_mean = np.convolve(self.metrics['inference_times'], np.ones(10)/10, mode='valid')
-        ax.plot(range(9, len(self.metrics['inference_times'])), rolling_mean, linewidth=2, color='red', label='10-iter MA')
-        ax.set_ylabel('Time (ms)', fontsize=11)
-        ax.set_title('Inference Time Over Iterations', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
-        
-        # Memory timeline
-        ax = axes[1]
-        ax.plot(iterations, self.metrics['memory_cpu']['rss_mb'], linewidth=1, alpha=0.7, color='coral', label='CPU Memory')
-        ax.plot(iterations, self.metrics['memory_gpu']['allocated_mb'], linewidth=1, alpha=0.7, color='lightgreen', label='GPU Memory')
-        ax.set_ylabel('Memory (MB)', fontsize=11)
-        ax.set_title('Memory Usage Over Iterations', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
-        
-        # CPU usage timeline
-        ax = axes[2]
-        ax.plot(iterations, self.metrics['cpu_percent'], linewidth=1, alpha=0.7, color='lightyellow')
-        rolling_mean_cpu = np.convolve(self.metrics['cpu_percent'], np.ones(10)/10, mode='valid')
-        ax.plot(range(9, len(self.metrics['cpu_percent'])), rolling_mean_cpu, linewidth=2, color='red', label='10-iter MA')
-        ax.set_xlabel('Iteration', fontsize=11)
-        ax.set_ylabel('CPU Usage (%)', fontsize=11)
-        ax.set_title('CPU Usage Over Iterations', fontsize=12, fontweight='bold')
-        ax.legend()
-        ax.grid(alpha=0.3)
-        
-        plt.tight_layout()
-        
-        output_path = Path(output_dir) / 'gan_performance_timeline.png'
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        logger.info(f"Timeline plot saved to {output_path}")
+        try:
+            # Use actual data length, not expected num_iterations (in case of early termination)
+            actual_iterations = len(self.metrics['inference_times'])
+            
+            if actual_iterations < 2:
+                logger.warning("Not enough data points to plot timeline (minimum 2 required)")
+                return
+            
+            fig, axes = plt.subplots(3, 1, figsize=(14, 10))
+            fig.suptitle('GAN Model Performance Over Time', fontsize=16, fontweight='bold')
+            
+            iterations = np.arange(actual_iterations)
+            
+            # Inference time timeline
+            ax = axes[0]
+            ax.plot(iterations, self.metrics['inference_times'], linewidth=1, alpha=0.7, color='steelblue')
+            if actual_iterations > 10:
+                rolling_mean = np.convolve(self.metrics['inference_times'], np.ones(10)/10, mode='valid')
+                ax.plot(range(9, len(self.metrics['inference_times'])), rolling_mean, linewidth=2, color='red', label='10-iter MA')
+            ax.set_ylabel('Time (ms)', fontsize=11)
+            ax.set_title('Inference Time Over Iterations', fontsize=12, fontweight='bold')
+            ax.legend()
+            ax.grid(alpha=0.3)
+            
+            # Memory timeline
+            ax = axes[1]
+            cpu_mem = np.array(self.metrics['memory_cpu']['rss_mb'])[:actual_iterations]
+            gpu_mem = np.array(self.metrics['memory_gpu']['allocated_mb'])[:actual_iterations]
+            ax.plot(iterations, cpu_mem, linewidth=1, alpha=0.7, color='coral', label='CPU Memory')
+            ax.plot(iterations, gpu_mem, linewidth=1, alpha=0.7, color='lightgreen', label='GPU Memory')
+            ax.set_ylabel('Memory (MB)', fontsize=11)
+            ax.set_title('Memory Usage Over Iterations', fontsize=12, fontweight='bold')
+            ax.legend()
+            ax.grid(alpha=0.3)
+            
+            # CPU usage timeline
+            ax = axes[2]
+            cpu_usage = np.array(self.metrics['cpu_percent'])[:actual_iterations]
+            ax.plot(iterations, cpu_usage, linewidth=1, alpha=0.7, color='lightyellow')
+            if actual_iterations > 10:
+                rolling_mean_cpu = np.convolve(cpu_usage, np.ones(10)/10, mode='valid')
+                ax.plot(range(9, len(cpu_usage)), rolling_mean_cpu, linewidth=2, color='red', label='10-iter MA')
+            ax.set_xlabel('Iteration', fontsize=11)
+            ax.set_ylabel('CPU Usage (%)', fontsize=11)
+            ax.set_title('CPU Usage Over Iterations', fontsize=12, fontweight='bold')
+            ax.legend()
+            ax.grid(alpha=0.3)
+            
+            plt.tight_layout()
+            
+            output_path = Path(output_dir) / 'gan_performance_timeline.png'
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            logger.info(f"Timeline plot saved to {output_path}")
+        except Exception as e:
+            logger.warning(f"Could not generate timeline plot: {e}")
     
     def save_statistics(self, output_dir: str = "benchmark_results") -> None:
         """Save statistics to JSON file"""
