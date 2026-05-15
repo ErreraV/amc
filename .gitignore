@@ -1,3 +1,6 @@
 /Project/performance_metrics.json
 **/__pycache__/
 **/*.pyc
+logs/
+benchmarks/results/
+benchmarks/paper_graphs/
