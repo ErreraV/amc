@@ -1,32 +1,112 @@
 #!/usr/bin/env python3
 """
-Flask dashboard for real-time latency visualization
+Flask dashboard for real-time latency visualization.
 """
 
 import logging
+from typing import Any, Dict, List, Optional
+
+import requests
 from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
-from ..amc.performance_analyzer import RealtimeAnalyzer
+
+from ..amc.performance_analyzer import (
+    LatencyHistogram,
+    summarize_latency_breakdown,
+    summarize_latency_histograms,
+    summarize_realtime_stats,
+)
 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
 
-# Store analyzer in Flask config (thread-safe and recommended)
-def set_analyzer(analyzer: RealtimeAnalyzer):
-    """Set the analyzer instance in Flask config"""
+DEFAULT_METRICS_SERVER_URL = 'http://127.0.0.1:5001'
+app.config['METRICS_SERVER_URL'] = DEFAULT_METRICS_SERVER_URL
+
+
+def set_analyzer(analyzer):
+    """Compatibility shim for older callers; dashboard now reads raw events directly."""
     app.config['ANALYZER'] = analyzer
-    logger.info(f"[Dashboard] Analyzer set in config: {analyzer}")
+    logger.info("[Dashboard] Legacy analyzer injection ignored; raw metrics are used instead")
+
+def set_metrics_server_url(url: str):
+    """Set the metrics server base URL used by dashboard endpoints."""
+    normalized_url = url.rstrip('/')
+    app.config['METRICS_SERVER_URL'] = normalized_url
+    logger.info(f"[Dashboard] Metrics server URL set to: {normalized_url}")
 
 
-@app.before_request
-def before_request():
-    """Ensure analyzer is available (debug hook)"""
-    analyzer = app.config.get('ANALYZER')
-    if analyzer is None:
-        logger.warning("[Dashboard] Analyzer not found in config during request")
-    return None
+def _metrics_server_url() -> str:
+    return app.config.get('METRICS_SERVER_URL', DEFAULT_METRICS_SERVER_URL).rstrip('/')
+
+
+def _fetch_recent_events(window: int = 500) -> List[Dict[str, Any]]:
+    response = requests.get(
+        f"{_metrics_server_url()}/api/events",
+        params={'window': window},
+        timeout=2,
+    )
+    response.raise_for_status()
+    events = response.json()
+    if not isinstance(events, list):
+        raise ValueError('Metrics server returned an invalid events payload')
+    return events
+
+
+def _empty_realtime_stats() -> Dict[str, Any]:
+    return {
+        'window_size': 0,
+        'avg_prediction_error': 0.0,
+        'prediction_accuracy': 0.0,
+        'avg_latency_ms': 0.0,
+        'avg_throughput': 0.0,
+        'avg_bler': 0.0,
+        'avg_ber': 0.0,
+        'success_rate': 0.0,
+        'last_sample_time': 0.0,
+        'decision_method_distribution': {
+            'gan_preselected': 0,
+            'rl_fallback': 0,
+        },
+    }
+
+
+def _empty_latency_histograms() -> Dict[str, Any]:
+    return {
+        'decision_latency': {
+            'histogram': LatencyHistogram(min_ms=0, max_ms=100, num_bins=50).to_dict(),
+            'stats': LatencyHistogram(min_ms=0, max_ms=100, num_bins=50).get_stats(),
+        },
+        'sionna_latency': {
+            'histogram': LatencyHistogram(min_ms=0, max_ms=100, num_bins=50).to_dict(),
+            'stats': LatencyHistogram(min_ms=0, max_ms=100, num_bins=50).get_stats(),
+        },
+        'gan_latency': {
+            'histogram': LatencyHistogram(min_ms=0, max_ms=50, num_bins=40).to_dict(),
+            'stats': LatencyHistogram(min_ms=0, max_ms=50, num_bins=40).get_stats(),
+        },
+    }
+
+
+def _empty_latency_breakdown() -> Dict[str, Any]:
+    return {
+        'decision_logic': {'mean_ms': 0.0, 'std_ms': 0.0, 'max_ms': 0.0},
+        'gan_prediction': {'mean_ms': 0.0, 'std_ms': 0.0, 'max_ms': 0.0, 'samples': 0},
+        'sionna_simulation': {'mean_ms': 0.0, 'std_ms': 0.0, 'max_ms': 0.0},
+    }
+
+
+def _latest_model_summary(events: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    if not events:
+        return None
+    latest = events[-1]
+    model_name = latest.get('model_name') or latest.get('model_mode') or 'unknown'
+    model_mode = latest.get('model_mode')
+    if model_mode:
+        return {'name': model_name, 'mode': model_mode}
+    return {'name': model_name}
 
 
 @app.route('/')
@@ -37,50 +117,98 @@ def dashboard():
 
 @app.route('/api/realtime-stats', methods=['GET'])
 def get_realtime_stats():
-    """Live performance metrics"""
+    """Live performance metrics derived from raw events."""
     window = request.args.get('window', 50, type=int)
-    analyzer = app.config.get('ANALYZER')
-    if analyzer is None:
-        return jsonify({'error': 'Analyzer not initialized'}), 503
-    stats = analyzer.get_real_time_stats(window)
+    try:
+        events = _fetch_recent_events(window)
+    except Exception as exc:
+        logger.warning(f"[Dashboard] Failed to fetch raw events: {exc}")
+        return jsonify({'error': f'Failed to fetch raw metrics: {exc}'}), 503
+
+    stats = summarize_realtime_stats(events, window_size=window) if events else _empty_realtime_stats()
+    current_model = _latest_model_summary(events)
+    if current_model is not None:
+        stats['current_model'] = current_model
     return jsonify(stats)
 
 
 @app.route('/api/latency-histograms', methods=['GET'])
 def get_latency_histograms():
-    """Get latency histograms for all latency types"""
-    analyzer = app.config.get('ANALYZER')
-    if analyzer is None:
-        return jsonify({'error': 'Analyzer not initialized'}), 503
-    histograms = analyzer.get_latency_histograms()
+    """Get latency histograms for all latency types from raw events."""
+    window = request.args.get('window', 500, type=int)
+    try:
+        events = _fetch_recent_events(window)
+    except Exception as exc:
+        logger.warning(f"[Dashboard] Failed to fetch raw events: {exc}")
+        return jsonify({'error': f'Failed to fetch raw metrics: {exc}'}), 503
+
+    histograms = summarize_latency_histograms(events) if events else _empty_latency_histograms()
     return jsonify(histograms)
 
 
 @app.route('/api/latency-breakdown', methods=['GET'])
 def get_latency_breakdown():
-    """Get latency breakdown analysis"""
-    analyzer = app.config.get('ANALYZER')
-    if analyzer is None:
-        return jsonify({'error': 'Analyzer not initialized'}), 503
-    breakdown = analyzer.get_latency_breakdown()
+    """Get latency breakdown analysis from raw events."""
+    window = request.args.get('window', 500, type=int)
+    try:
+        events = _fetch_recent_events(window)
+    except Exception as exc:
+        logger.warning(f"[Dashboard] Failed to fetch raw events: {exc}")
+        return jsonify({'error': f'Failed to fetch raw metrics: {exc}'}), 503
+
+    breakdown = summarize_latency_breakdown(events) if events else _empty_latency_breakdown()
     return jsonify(breakdown)
 
 
 @app.route('/api/flow/<int:flow_id>/stats', methods=['GET'])
 def get_flow_stats(flow_id):
-    """Per-flow metrics"""
-    analyzer = app.config.get('ANALYZER')
-    if analyzer is None:
-        return jsonify({'error': 'Analyzer not initialized'}), 503
-    stats = analyzer.get_flow_stats(flow_id)
-    return jsonify(stats)
+    """Per-flow metrics derived from raw events."""
+    window = request.args.get('window', 5000, type=int)
+    try:
+        events = _fetch_recent_events(window)
+    except Exception as exc:
+        logger.warning(f"[Dashboard] Failed to fetch raw events: {exc}")
+        return jsonify({'error': f'Failed to fetch raw metrics: {exc}'}), 503
+
+    flow_events = [event for event in events if int(event.get('flow_id', -1)) == flow_id]
+    if not flow_events:
+        return jsonify({})
+
+    return jsonify({
+        'flow_id': flow_id,
+        'decisions': len(flow_events),
+        'avg_prediction_error': float(sum(float(event.get('prediction_error', 0.0)) for event in flow_events) / len(flow_events)),
+        'avg_throughput': float(sum(float(event.get('throughput', 0.0)) for event in flow_events) / len(flow_events)),
+        'avg_bler': float(sum(float(event.get('bler', 0.0)) for event in flow_events) / len(flow_events)),
+        'avg_decision_latency': float(sum(float(event.get('decision_latency_ms', 0.0)) for event in flow_events) / len(flow_events)),
+        'modulation_distribution': {
+            mod: sum(1 for event in flow_events if event.get('chosen_modulation') == mod or event.get('selected_modulation') == mod)
+            for mod in ['qam4', 'qam16', 'qam64', 'qam256']
+        }
+    })
 
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    """Health check"""
-    analyzer = app.config.get('ANALYZER')
-    return jsonify({'status': 'ok', 'analyzer_ready': analyzer is not None})
+    """Health check for the dashboard and metrics server bridge."""
+    try:
+        response = requests.get(f"{_metrics_server_url()}/health", timeout=1)
+        response.raise_for_status()
+        metrics_health = response.json()
+        return jsonify({
+            'status': 'ok',
+            'metrics_server_ready': True,
+            'analyzer_ready': True,
+            'event_count': metrics_health.get('event_count', 0),
+        })
+    except Exception as exc:
+        logger.warning(f"[Dashboard] Metrics server health check failed: {exc}")
+        return jsonify({
+            'status': 'degraded',
+            'metrics_server_ready': False,
+            'analyzer_ready': False,
+            'error': str(exc),
+        })
 
 
 HTML_TEMPLATE = '''
@@ -450,38 +578,15 @@ HTML_TEMPLATE = '''
 '''
 
 
-def run_dashboard(analyzer: RealtimeAnalyzer, host='0.0.0.0', port=5000, debug=False):
+def run_dashboard(analyzer=None, host='0.0.0.0', port=5000, debug=False, metrics_server_url: str = DEFAULT_METRICS_SERVER_URL):
     """Start the dashboard server"""
-    logger.info(f"[Dashboard] Initializing with analyzer: {analyzer}")
-    set_analyzer(analyzer)
-    logger.info(f"[Dashboard] Analyzer stored in Flask config: {app.config.get('ANALYZER')}")
+    if analyzer is not None:
+        set_analyzer(analyzer)
+    set_metrics_server_url(metrics_server_url)
+    logger.info(f"[Dashboard] Using metrics server: {_metrics_server_url()}")
     logger.info(f"[Dashboard] Starting Flask server on {host}:{port}")
     app.run(host=host, port=port, debug=debug, threaded=True)
 
 
 if __name__ == '__main__':
-    from performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
-    import numpy as np
-    
-    # Create test data
-    analyzer = RealtimeAnalyzer()
-    
-    for i in range(200):
-        metrics = PerformanceMetrics(
-            flow_id=i % 10,
-            decision_method='preselected_from_gan_prediction' if i % 2 == 0 else 'rl_agent_current_snr',
-            predicted_snr=20 + np.random.randn() * 2,
-            actual_snr=20 + np.random.randn() * 2,
-            prediction_error=abs(np.random.randn() * 3),
-            selected_modulation=np.random.choice(['qam4', 'qam16', 'qam64', 'qam256']),
-            ber=np.random.exponential(1e-5),
-            bler=np.random.uniform(0, 0.3),
-            throughput=np.random.uniform(0, 8),
-            decision_latency_ms=np.abs(np.random.normal(35, 12)),
-            sionna_latency_ms=np.abs(np.random.normal(28, 10)),
-            gan_latency_ms=np.abs(np.random.normal(6, 2.5)) if i % 2 == 0 else 0,
-            success=np.random.random() > 0.1
-        )
-        analyzer.record_decision(metrics)
-    
-    run_dashboard(analyzer, debug=True)
+    run_dashboard(debug=True)

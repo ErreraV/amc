@@ -24,6 +24,11 @@ class EventPublisher:
     def publish(self, event: Dict[str, Any]):
         try:
             self._q.put_nowait((time.time(), event))
+            try:
+                qsize = self._q.qsize()
+            except Exception:
+                qsize = -1
+            logger.info(f"EventPublisher.enqueue: queued event type={event.get('type')} qsize={qsize}")
         except queue.Full:
             logger.warning("EventPublisher queue full, dropping event")
 
@@ -35,6 +40,13 @@ class EventPublisher:
                 ts, event = self._q.get(timeout=0.5)
             except Exception:
                 continue
+
+            # log processing
+            try:
+                qsize = self._q.qsize()
+            except Exception:
+                qsize = -1
+            logger.info(f"EventPublisher.worker: processing event type={event.get('type')} qsize={qsize}")
 
             # write to disk
             if self.disk_path:
@@ -49,9 +61,9 @@ class EventPublisher:
             try:
                 r = session.post(self.server_url, json=event, timeout=1.0, headers=headers)
                 if r.status_code != 200:
-                    logger.debug(f"Metrics server responded: {r.status_code} {r.text}")
+                    logger.warning(f"Metrics server responded: {r.status_code} {r.text}")
             except Exception as e:
-                logger.debug(f"Failed to POST event to metrics server: {e}")
+                logger.warning(f"Failed to POST event to metrics server: {e}")
 
         session.close()
 

@@ -38,7 +38,7 @@ def main():
     try:
         # Import after checking files
         from ..amc.integrated_amc_gan import IntegratedAMCServer
-        from ..metrics_publisher.metrics_server import run_metrics_server
+        from ..servers.metrics_server import run_metrics_server
         from ..servers.dashboard import run_dashboard
 
         # Start metrics server in background thread

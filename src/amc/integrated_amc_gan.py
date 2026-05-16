@@ -15,7 +15,7 @@ from pathlib import Path
 from .gan_snr_predictor import SNRGan, GANConfig, SNRDataProcessor
 from ..servers.amc_server import AdvancedQLearningAgent, json_serializable, safe_json_dumps
 from .performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
-from ..event_publisher.event_publisher import EventPublisher
+from ..tools.event_publisher import EventPublisher
 
 logger = logging.getLogger(__name__)
 

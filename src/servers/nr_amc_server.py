@@ -12,7 +12,7 @@ import numpy as np
 from typing import Dict, Any
 from pathlib import Path
 
-from ..event_publisher.event_publisher import EventPublisher
+from ..tools.event_publisher import EventPublisher
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

@@ -18,7 +18,7 @@ logger.info("Testing imports...")
 try:
     from src.amc.integrated_amc_gan import IntegratedAMCServer
     from src.amc.performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
-    from src.metrics_publisher.metrics_server import run_metrics_server
+    from src.servers.metrics_server import run_metrics_server
     from src.servers.dashboard import run_dashboard, app
     logger.info("✓ All imports successful")
 except ImportError as e:

@@ -32,7 +32,7 @@ def main():
             logger.warning(f"Model file not found (server will start with fresh state): {fname}")
 
     try:
-        from ..metrics_publisher.metrics_server import run_metrics_server
+        from ..servers.metrics_server import run_metrics_server
         from ..servers.amc_server import RLAMCServer
         from ..servers.dashboard import run_dashboard
 
@@ -48,7 +48,6 @@ def main():
         logger.info("Starting dashboard on port 5000...")
         dashboard_thread = threading.Thread(
             target=lambda: run_dashboard(
-                None,
                 host='0.0.0.0',
                 port=5000,
                 debug=False

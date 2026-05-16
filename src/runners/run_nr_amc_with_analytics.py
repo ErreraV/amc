@@ -21,7 +21,7 @@ def main():
     logger.info("=" * 60)
 
     try:
-        from ..metrics_publisher.metrics_server import run_metrics_server
+        from ..servers.metrics_server import run_metrics_server
         from ..servers.dashboard import run_dashboard
         from ..servers.nr_amc_server import NRAMCServer
 
