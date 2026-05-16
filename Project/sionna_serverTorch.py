@@ -411,7 +411,7 @@ class RealisticPHYProcessor:
 
 
 class RealisticSionnaServer:
-    def __init__(self, host='127.0.0.1', port=9000):
+    def __init__(self, host='0.0.0.0', port=9000):
         self.host = host
         self.port = port
         self.phy_processor = RealisticPHYProcessor()
@@ -570,7 +570,7 @@ def main():
         print(f"PyTorch: {torch.__version__}")
     print(f"Sionna: {'available' if SIONNA_AVAILABLE else 'unavailable (simulation mode)'}")
 
-    server = RealisticSionnaServer()
+    server = RealisticSionnaServer(host='0.0.0.0', port=9000)
 
     try:
         server.start()

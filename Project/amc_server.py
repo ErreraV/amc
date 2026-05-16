@@ -535,9 +535,10 @@ class AdvancedQLearningAgent:
 
 
 class RLAMCServer:
-    def __init__(self, host='127.0.0.1', port=9001, load_model=True):
+    def __init__(self, host='127.0.0.1', port=9001, load_model=True, use_sionna_validation=True):
         self.host = host
         self.port = port
+        self.use_sionna_validation = use_sionna_validation
 
         self.agent = AdvancedQLearningAgent()
         if load_model:
@@ -760,8 +761,10 @@ class RLAMCServer:
             action = self.agent.select_action(normalized_state, snr, self.training_mode)
             modulation = self.agent.actions[action]
 
-            sionna_result = self._test_with_sionna(modulation, snr, channel_type, channel_info, flow_id)
-
+            if self.use_sionna_validation:
+                sionna_result = self._test_with_sionna(modulation, snr, channel_type, channel_info, flow_id)
+            else:
+                sionna_result = self._fallback_simulation(modulation, snr, channel_type)
             if self.training_mode and flow_state['last_state'] is not None:
                 reward = self.agent.calculate_adaptive_reward(
                     sionna_result['throughput'],
@@ -1100,7 +1103,7 @@ class RLAMCServer:
 
 
 def main():
-    server = RLAMCServer(load_model=True)
+    server = RLAMCServer(load_model=True, use_sionna_validation=False)
     try:
         server.start_server()
     except KeyboardInterrupt:

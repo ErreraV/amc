@@ -132,6 +132,10 @@ DynamicMobilityConfig global_mobility_config;
 double simTime = 60.0;
 
 int global_packet_size=64;
+std::string gAmcServerIp = "127.0.0.1";
+uint16_t gAmcServerPort = 9001;
+std::string gSionnaServerIp = "127.0.0.1";
+uint16_t gSionnaServerPort = 9000;
 
 RealisticChannelConfig GetChannelConfigForEnvironment(ChannelEnvironment env, double distance) {
     RealisticChannelConfig config = global_channel_config;
@@ -284,8 +288,8 @@ std::string RequestModulationFromAMC(double snr, uint32_t flowId,
 
     sockaddr_in serv_addr;
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(9001);
-    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+    serv_addr.sin_port = htons(gAmcServerPort);
+    inet_pton(AF_INET, gAmcServerIp.c_str(), &serv_addr.sin_addr);
 
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         NS_LOG_WARN("AMC connection failed");
@@ -373,8 +377,8 @@ void SendFeedbackToAMC(uint32_t flowId, double throughput, double ber, double bl
 
     sockaddr_in serv_addr;
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(9001);
-    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+    serv_addr.sin_port = htons(gAmcServerPort);
+    inet_pton(AF_INET, gAmcServerIp.c_str(), &serv_addr.sin_addr);
 
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         close(sock);
@@ -587,17 +591,18 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
 
         sockaddr_in serv_addr;
         serv_addr.sin_family = AF_INET;
-        serv_addr.sin_port = htons(9000);
-        inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+        serv_addr.sin_port = htons(gSionnaServerPort);
+        inet_pton(AF_INET, gSionnaServerIp.c_str(), &serv_addr.sin_addr);
 
         if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) >= 0) {
             ssize_t bytesSent = send(sock, json_str.c_str(), json_str.size(), 0);
 
             if (bytesSent > 0) {
-                char buffer[8192] = {0};
-                ssize_t bytesRead = read(sock, buffer, 8192);
+                char buffer[16384] = {0};
+                ssize_t bytesRead = read(sock, buffer, sizeof(buffer) - 1);
 
                 if (bytesRead > 0) {
+                    buffer[bytesRead] = '\0';
                     try {
                         json response = json::parse(buffer);
 
@@ -1078,6 +1083,11 @@ int main(int argc, char* argv[])
     std::string outputDir = "./";
     std::string ganDataFile = "gan_data_.json";
 
+    std::string amcServerIp = "127.0.0.1";
+    uint16_t amcServerPort = 9001;
+    std::string sionnaServerIp = "127.0.0.1";
+    uint16_t sionnaServerPort = 9000;
+
     CommandLine cmd(__FILE__);
     cmd.AddValue("gNbNum", "Number of gNBs", gNbNum);
     cmd.AddValue("ueNumPergNb", "Number of UE per gNB", ueNumPergNb);
@@ -1092,9 +1102,16 @@ int main(int argc, char* argv[])
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("mobilityType", "Mobility type (0=STATIC, 1=LINEAR, 2=CIRCULAR, 3=RANDOM_WALK, 4=HIGHWAY, 5=URBAN_GRID)", mobilityType);
     cmd.AddValue("packetSize", "Packet size for simulation", global_packet_size);
-
+    cmd.AddValue("amcIp", "AMC server IP address", amcServerIp);
+    cmd.AddValue("amcPort", "AMC server port", amcServerPort);
+    cmd.AddValue("sionnaIp", "Sionna server IP address", sionnaServerIp);
+    cmd.AddValue("sionnaPort", "Sionna server port", sionnaServerPort);
 
     cmd.Parse(argc, argv);
+    gAmcServerIp = amcServerIp;
+    gAmcServerPort = amcServerPort;
+    gSionnaServerIp = sionnaServerIp;
+    gSionnaServerPort = sionnaServerPort;
     global_mobility_config.type = static_cast<MobilityType>(mobilityType);
 
     simTime = simTimeNs3.GetSeconds();

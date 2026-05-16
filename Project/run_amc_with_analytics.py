@@ -43,7 +43,7 @@ def main():
         # Create AMC server
         logger.info("Initializing integrated AMC server...")
         server = IntegratedAMCServer(
-            host='127.0.0.1',
+            host='0.0.0.0',
             port=9001,
             training_data_file='gan_training_data_enhanced.json'
         )
@@ -69,8 +69,8 @@ def main():
         logger.info("🎯 Services Running:")
         logger.info("")
         logger.info("  📊 Dashboard URL:     http://localhost:5000")
-        logger.info("  🔌 AMC Server:        127.0.0.1:9001")
-        logger.info("  📈 Sionna Expected:   127.0.0.1:9000")
+        logger.info("  🔌 AMC Server:        0.0.0.0:9001")
+        logger.info("  📈 Sionna Expected:   0.0.0.0:9000")
         logger.info("")
         logger.info("Features:")
         logger.info("  • Real-time latency histograms")
