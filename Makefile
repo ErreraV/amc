@@ -1,5 +1,5 @@
 HOST_IP= 127.0.0.1
-NS3_DIR=./../../ns-allinone-3.44/ns-3.44
+NS3_DIR=./../ns-allinone-3.44/ns-3.44
 
 kill-ports:
 	@echo "Killing processes on ports 5000 and 8000..."
@@ -11,11 +11,11 @@ kill-ports:
 	@echo "Ports 5000 and 8000 are now free."
 
 list-ports:
-		nmap -sT $(HOST_IP)
+	nmap -sT $(HOST_IP)
 
 run-dashboard-amc-gan:
-		@echo "Starting AMC Dashboard with AMC-GAN data source..."
-		@python -m src.runners.run_dashboard_metrics
+	@echo "Starting AMC Dashboard with AMC-GAN data source..."
+	@python -m src.runners.run_dashboard_metrics
 
 run-amc-int-server:
 	@echo "Starting AMC Integrated Server..."
@@ -30,7 +30,10 @@ run-amc-gan:
 	python src/servers/amc_gan_server.py
 
 run-demo-nr:
-	$(NS3_DIR)/ns3 run scratch/cttc-nr-demo-1.cc  -- --simTime=5.0 --packetSize=8192 
+	$(NS3_DIR)/ns3 run scratch/cttc-nr-demo-1.cc  -- --simTime=10.0 --packetSize=8192 
+
+build-ns3:
+	$(NS3_DIR)/ns3 build
 
 download-models:
 	@echo "Downloading pre-trained AMC-GAN models..."

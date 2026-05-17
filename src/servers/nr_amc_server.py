@@ -160,8 +160,20 @@ class NRAMCServer:
 
     def handle_client(self, conn, addr):
         try:
-            data = conn.recv(4096).decode()
-            request = json.loads(data)
+            data = ""
+            while True:
+                chunk = conn.recv(65536).decode('utf-8', errors='ignore')
+                if not chunk:
+                    break
+                data += chunk
+                try:
+                    request = json.loads(data)
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+            if not data:
+                return
 
             request_type = request.get('type', 'get_modulation')
             self.total_requests += 1

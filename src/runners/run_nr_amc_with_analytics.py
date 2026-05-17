@@ -3,7 +3,7 @@
 Runner for NR-standard AMC + Metrics server + Dashboard.
 """
 import sys
-import threading
+from multiprocessing import Process
 import time
 import logging
 from pathlib import Path
@@ -15,36 +15,59 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _stop_processes(processes):
+    for process in processes:
+        if process.is_alive():
+            process.terminate()
+
+    for process in processes:
+        process.join(timeout=5)
+
+
+def _ensure_repo_root_on_path() -> Path:
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    return repo_root
+
+
 def main():
     logger.info("=" * 60)
     logger.info("NR Standard AMC Server with Dashboard")
     logger.info("=" * 60)
 
     try:
-        from ..servers.metrics_server import run_metrics_server
-        from ..servers.dashboard import run_dashboard
-        from ..servers.nr_amc_server import NRAMCServer
+        _ensure_repo_root_on_path()
+        from src.servers.metrics_server import run_metrics_server  # type: ignore
+        from src.servers.dashboard import run_dashboard  # type: ignore
+        from src.servers.nr_amc_server import NRAMCServer  # type: ignore
+
+        processes = []
 
         logger.info("Starting metrics server on port 5001...")
-        metrics_thread = threading.Thread(
-            target=lambda: run_metrics_server(host='127.0.0.1', port=5001),
-            daemon=True
+        metrics_process = Process(
+            target=run_metrics_server,
+            kwargs={'host': '127.0.0.1', 'port': 5001},
+            daemon=True,
         )
-        metrics_thread.start()
+        metrics_process.start()
+        processes.append(metrics_process)
         time.sleep(1)
         logger.info("Metrics server started")
 
         logger.info("Starting dashboard on port 5000...")
-        dashboard_thread = threading.Thread(
-            target=lambda: run_dashboard(
-                None,
-                host='0.0.0.0',
-                port=5000,
-                debug=False
-            ),
-            daemon=True
+        dashboard_process = Process(
+            target=run_dashboard,
+            kwargs={
+                'host': '0.0.0.0',
+                'port': 5000,
+                'debug': False,
+                'metrics_server_url': 'http://127.0.0.1:5001',
+            },
+            daemon=True,
         )
-        dashboard_thread.start()
+        dashboard_process.start()
+        processes.append(dashboard_process)
         time.sleep(1)
         logger.info("Dashboard started")
 
@@ -70,6 +93,9 @@ def main():
     except Exception as e:
         logger.error(f"Startup error: {e}", exc_info=True)
         return 1
+    finally:
+        if 'processes' in locals():
+            _stop_processes(processes)
 
     return 0
 

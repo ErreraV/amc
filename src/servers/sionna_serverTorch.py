@@ -458,22 +458,32 @@ class RealisticSionnaServer:
     def handle_client(self, conn, addr):
         msg = None
         try:
-            data = conn.recv(8192).decode()
+            data = ""
+            while True:
+                chunk = conn.recv(65536).decode('utf-8', errors='ignore')
+                if not chunk:
+                    break
+                data += chunk
+                try:
+                    msg = json.loads(data)
+                    break
+                except json.JSONDecodeError:
+                    continue
+
             if not data:
                 conn.close()
                 return
 
             try:
-                msg = json.loads(data)
                 self.stats['total_requests'] += 1
                 destination = msg.get('type', 'unknown')
                 channel_type = msg.get('channel_type', 'rayleigh')
                 logger.info(f"{destination} -> Sionna: ID={msg['id']} | channel={channel_type} | "
                             f"mod={msg['modulation']} | SNR={msg['snr_db']}dB | bits={msg['k']}")
 
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON: {e}")
-                error_msg = {"error": "Invalid JSON"}
+            except Exception as e:
+                logger.error(f"Error parsing message: {e}")
+                error_msg = {"error": "Invalid Message"}
                 conn.sendall(json.dumps(error_msg).encode())
                 conn.close()
                 return

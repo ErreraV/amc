@@ -160,8 +160,20 @@ class IntegratedAMCServer:
 
     def handle_client(self, conn, addr):
         try:
-            data = conn.recv(4096).decode()
-            request = json.loads(data)
+            data = ""
+            while True:
+                chunk = conn.recv(65536).decode('utf-8', errors='ignore')
+                if not chunk:
+                    break
+                data += chunk
+                try:
+                    request = json.loads(data)
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+            if not data:
+                return
 
             request_type = request.get('type', 'get_modulation')
 
@@ -341,21 +353,26 @@ class IntegratedAMCServer:
                 return
 
             history, aux = self.snr_processor.prepare_prediction_data(flow_id)
-            raw_predicted_snr = self.gan.predict_next_snr(history, aux, return_confidence=False)
-
-            logger.debug(f"Raw GAN output (normalized): {raw_predicted_snr.item():.6f}")
-
+            # Request prediction with confidence interval for debugging
             try:
-                predicted_snr_value = self.preprocessor.denormalize_snr(raw_predicted_snr)
-                logger.info(f"GAN Prediction Flow {flow_id} t+1: "
-                            f"Normalized={raw_predicted_snr.item():.3f} -> "
-                            f"Denormalized={predicted_snr_value:.1f}dB")
-            except Exception as e:
-                logger.error(f"Denormalization failed: {e}")
-                self.stats['denormalization_errors'] += 1
-                normalized_val = float(raw_predicted_snr.item())
-                predicted_snr_value = 20.0 + normalized_val * 8.0
-                logger.warning(f"Using emergency scaling: {normalized_val:.3f} -> {predicted_snr_value:.1f}dB")
+                raw_predicted_snr, conf_interval = self.gan.predict_next_snr(history, aux, return_confidence=True)
+            except Exception:
+                # Fallback to simple prediction if confidence not available
+                raw_predicted_snr = self.gan.predict_next_snr(history, aux, return_confidence=False)
+                conf_interval = None
+
+            predicted_snr_value = float(raw_predicted_snr.item())
+            try:
+                history_list = history.cpu().numpy().tolist() if hasattr(history, 'cpu') else list(history)
+            except Exception:
+                history_list = repr(history)
+            try:
+                aux_list = aux.cpu().numpy().tolist() if hasattr(aux, 'cpu') else list(aux)
+            except Exception:
+                aux_list = repr(aux)
+
+            logger.info(f"GAN Prediction Flow {flow_id} t+1: Predicted SNR={predicted_snr_value:.1f}dB | "
+                        f"history={history_list} | aux={aux_list} | conf={conf_interval}")
 
             if predicted_snr_value < -5.0 or predicted_snr_value > 45.0:
                 logger.warning(f"Unreasonable prediction {predicted_snr_value:.1f}dB, clamping to [-5,45]")

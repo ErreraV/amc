@@ -10,6 +10,36 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _json_safe(value: Any) -> Any:
+    """Convert nested values to JSON-serializable Python primitives."""
+    # numpy/tensor scalar-like objects usually expose item()
+    item_fn = getattr(value, "item", None)
+    if callable(item_fn):
+        try:
+            return _json_safe(item_fn())
+        except Exception:
+            pass
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+
+    # numpy arrays usually expose tolist()
+    tolist_fn = getattr(value, "tolist", None)
+    if callable(tolist_fn):
+        try:
+            return _json_safe(tolist_fn())
+        except Exception:
+            pass
+
+    return str(value)
+
+
 class EventPublisher:
     """Asynchronous publisher that writes JSONL to disk and POSTs to metrics server."""
 
@@ -23,12 +53,13 @@ class EventPublisher:
 
     def publish(self, event: Dict[str, Any]):
         try:
-            self._q.put_nowait((time.time(), event))
+            safe_event = _json_safe(event)
+            self._q.put_nowait((time.time(), safe_event))
             try:
                 qsize = self._q.qsize()
             except Exception:
                 qsize = -1
-            logger.info(f"EventPublisher.enqueue: queued event type={event.get('type')} qsize={qsize}")
+            logger.info(f"EventPublisher.enqueue: queued event type={safe_event.get('type')} qsize={qsize}")
         except queue.Full:
             logger.warning("EventPublisher queue full, dropping event")
 
