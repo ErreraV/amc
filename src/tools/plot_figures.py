@@ -369,6 +369,7 @@ def fig10_bler_vs_snr_box(events: List[Dict[str, Any]], outpath: str):
 
 
 def main(argv=None):
+    import time
     p = argparse.ArgumentParser()
     p.add_argument('--metrics-url', '-m', default='http://127.0.0.1:5001', help='Base URL of the metrics server (default: http://127.0.0.1:5001)')
     p.add_argument(
@@ -378,12 +379,33 @@ def main(argv=None):
         help='Base output directory for benchmark-style figure runs (default: benchmarks/results)',
     )
     p.add_argument('--fig', '-f', nargs='+', type=int, choices=[8, 9, 10, 11], default=[8, 9, 10, 11], help='Which figures to generate')
-    p.add_argument('--window', '-w', type=int, default=500, help='Number of recent events to fetch (or 0 for all)')
+    p.add_argument('--window', '-w', type=int, default=5000, help='Number of recent events to fetch per poll (default: 5000)')
+    p.add_argument('--interval', '-i', type=float, default=2.0, help='Polling interval in seconds (default: 2.0)')
     p.add_argument('--rolling', type=int, default=50, help='Rolling window size for Fig 9')
     args = p.parse_args(argv)
 
-    window = None if args.window == 0 else args.window
-    events = fetch_events(args.metrics_url, window=window)
+    print(f"Polling metrics server every {args.interval}s... Press Ctrl+C to stop and generate plots.")
+    
+    all_events = {}
+    try:
+        while True:
+            try:
+                events_batch = fetch_events(args.metrics_url, window=args.window)
+                for e in events_batch:
+                    # Use request_id if available, fallback to timestamp
+                    key = e.get('request_id') or str(e.get('timestamp'))
+                    all_events[key] = e
+            except Exception as e:
+                print(f"Warning: Failed to fetch events: {e}")
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print(f"\nInterrupted! Generating plots from {len(all_events)} collected events...")
+    
+    if not all_events:
+        print("No events collected. Exiting.")
+        return
+        
+    events = sorted(list(all_events.values()), key=lambda x: float(x.get('timestamp', 0)))
 
     base_outdir = Path(args.outdir)
     base_outdir.mkdir(parents=True, exist_ok=True)

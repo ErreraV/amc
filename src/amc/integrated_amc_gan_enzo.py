@@ -4,26 +4,10 @@ Integrated runner for AMC server + Dashboard with real-time histogram visualizat
 """
 
 import sys
-from multiprocessing import Process
+import threading
 import time
 import logging
 from pathlib import Path
-
-if __package__:
-    from ..servers import dashboard, metrics_server
-else:
-    import sys as _sys
-
-    here = Path(__file__).resolve().parent
-    src_dir = None
-    for p in [here] + list(here.parents):
-        if (p / 'servers').is_dir():
-            src_dir = p
-            break
-    if src_dir is None:
-        src_dir = here.parent
-    _sys.path.insert(0, str(src_dir))
-    from servers import dashboard, metrics_server
 
 # Configure logging
 logging.basicConfig(
@@ -31,20 +15,6 @@ logging.basicConfig(
     format='[%(asctime)s] %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-
-def _stop_processes(processes):
-    for process in processes:
-        if process.is_alive():
-            process.terminate()
-
-    for process in processes:
-        process.join(timeout=5)
-
-
-def start_metrics(host: str = '127.0.0.1', port: int = 5001):
-    logger.info(f"Starting metrics server on {host}:{port}")
-    metrics_server.run_metrics_server(host=host, port=port)
 
 def main():
     """Start AMC server and dashboard together"""
@@ -68,23 +38,20 @@ def main():
     try:
         # Import after checking files
         from ..amc.integrated_amc_gan import IntegratedAMCServer
+        from ..servers.metrics_server import run_metrics_server
+        from ..servers.dashboard import run_dashboard
 
-        metrics_host = '127.0.0.1'
-        metrics_port = 5001
-        dashboard_host = '0.0.0.0'
-        dashboard_port = 5000
-        processes = []
-
-        # Start metrics server in a separate process
-        logger.info("Starting metrics server in a separate process...")
-        metrics_process = Process(
-            target=start_metrics,
-            kwargs={'host': metrics_host, 'port': metrics_port},
-            daemon=True,
+        # Start metrics server in background thread
+        logger.info("Starting metrics server on port 5001...")
+        metrics_thread = threading.Thread(
+            target=lambda: run_metrics_server(
+                host='127.0.0.1',
+                port=5001
+            ),
+            daemon=True
         )
-        metrics_process.start()
-        processes.append(metrics_process)
-        time.sleep(0.2)
+        metrics_thread.start()
+        time.sleep(1)
         logger.info("✓ Metrics server started")
         
         # Create AMC server
@@ -95,22 +62,19 @@ def main():
         )
         logger.info(f"✓ AMC Server initialized with analyzer: {server.analyzer}")
         
-        # Start dashboard in a separate process
-        metrics_url = f"http://{metrics_host}:{metrics_port}"
-        logger.info(f"Starting dashboard server on port {dashboard_port}...")
-        logger.info(f"  Pointing dashboard to metrics server: {metrics_url}")
-        dashboard_process = Process(
-            target=dashboard.run_dashboard,
-            kwargs={
-                'host': dashboard_host,
-                'port': dashboard_port,
-                'debug': False,
-                'metrics_server_url': metrics_url,
-            },
-            daemon=True,
+        # Start dashboard in background thread
+        logger.info("Starting dashboard server on port 5000...")
+        logger.info(f"  Passing analyzer to dashboard: {server.analyzer}")
+        dashboard_thread = threading.Thread(
+            target=lambda: run_dashboard(
+                server.analyzer,
+                host='0.0.0.0',
+                port=5000,
+                debug=False
+            ),
+            daemon=True
         )
-        dashboard_process.start()
-        processes.append(dashboard_process)
+        dashboard_thread.start()
         time.sleep(1)  # Give dashboard time to start
         logger.info("✓ Dashboard started")
         
@@ -142,9 +106,6 @@ def main():
     except Exception as e:
         logger.error(f"❌ Error: {e}", exc_info=True)
         return 1
-    finally:
-        if 'processes' in locals():
-            _stop_processes(processes)
     
     return 0
 
