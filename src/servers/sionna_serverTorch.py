@@ -222,7 +222,8 @@ class RealisticPHYProcessor:
         snr_efficiency = min(1.0, (snr + 10) / 40.0)
         channel_overhead = 0.85
 
-        effective_throughput = (
+        # 1. Calculate Spectral Efficiency (bits/s/Hz)
+        spectral_efficiency = (
             base_rate *
             (1.0 - bler) *
             quality_factor *
@@ -231,9 +232,14 @@ class RealisticPHYProcessor:
         )
 
         variability = 0.975 + 0.05 * np.random.random()
-        effective_throughput *= variability
+        spectral_efficiency *= variability
 
-        return max(0.0, effective_throughput)
+        # 2. Convert to Throughput (Mbps)
+        # Using the 50 MHz bandwidth configured in your ns-3 setup
+        channel_bandwidth_mhz = 50.0
+        effective_throughput_mbps = spectral_efficiency * channel_bandwidth_mhz
+
+        return max(0.0, effective_throughput_mbps)
 
     def process_transmission_realistic(self, bits: np.ndarray, modulation: str, snr_db: float,
                                        channel_type: str = "rayleigh", channel_params: Optional[dict] = None):
