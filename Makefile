@@ -19,7 +19,7 @@ run-dashboard-amc-gan:
 
 run-amc-int-server:
 	@echo "Starting AMC Integrated Server..."
-	python src/runners/integrated_amc_gan_enzo.py
+	python src/amc/integrated_amc_gan_enzo.py
 
 run-sionna-server:
 	@echo "Starting Sionna Server..."
