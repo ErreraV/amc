@@ -32,6 +32,13 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
+# Centralized color mapping for QAM modulations — used by multiple figures
+MOD_COLORS = {
+    'qam4': '#1f77b4',
+    'qam16': '#2ca02c',
+    'qam64': '#ff7f0e',
+    'qam256': '#d62728'
+}
 
 def _first_present(event: Dict[str, Any], *keys: str, default: Any = None) -> Any:
     for key in keys:
@@ -190,13 +197,18 @@ def fig3_throughput_by_modulation(events: List[Dict[str, Any]], outpath: str):
     if not groups:
         raise RuntimeError('No modulation/throughput pairs found')
 
-    mods = sorted(groups.keys())
+    # enforce desirable modulation ordering: qam4, qam16, qam64, qam256
+    desired_order = ['qam4', 'qam16', 'qam64', 'qam256']
+    mods = [m for m in desired_order if m in groups]
+    # append any other modulation keys not in the desired list
+    others = [m for m in sorted(groups.keys()) if m not in mods]
+    mods.extend(others)
     data = [groups[m] for m in mods]
 
     plt.figure(figsize=(8, 4))
     b = plt.boxplot(data, labels=mods, patch_artist=True)
-    colors = ['#4c72b0', '#dd8452', '#55a868', '#c44e52']
-    for patch, color in zip(b['boxes'], (colors * 10)):
+    box_colors = [MOD_COLORS.get(m, '#7f7f7f') for m in mods]
+    for patch, color in zip(b['boxes'], box_colors):
         patch.set_facecolor(color)
 
     plt.ylabel('Throughput (Mbps)')
@@ -221,12 +233,8 @@ def fig4_throughput_vs_snr(events: List[Dict[str, Any]], outpath: str):
     if not samples:
         raise RuntimeError('No SNR/throughput samples found')
 
-    mod_colors = {
-        'qam4': '#1f77b4',
-        'qam16': '#ff7f0e',
-        'qam64': '#2ca02c',
-        'qam256': '#d62728'
-    }
+    # use centralized colors
+    mod_colors = MOD_COLORS
 
     plt.figure(figsize=(6, 4))
     for mod, color in mod_colors.items():
@@ -271,7 +279,7 @@ def fig5_spectral_efficiency(events: List[Dict[str, Any]], outpath: str, bandwid
         thr = [t for t in thr if t is not None]
         if xs and thr:
             spec_eff = [t / bandwidth_mhz for t in thr]
-            plt.scatter(xs, spec_eff, s=18, alpha=0.8, label=mod)
+            plt.scatter(xs, spec_eff, s=18, alpha=0.8, label=mod, color=MOD_COLORS.get(mod, '#7f7f7f'))
 
     plt.xlabel('SNR (dB)')
     plt.ylabel('Spectral efficiency (bits/s/Hz)')
@@ -284,25 +292,35 @@ def fig5_spectral_efficiency(events: List[Dict[str, Any]], outpath: str, bandwid
 
 
 def fig6_ber_vs_snr_box(events: List[Dict[str, Any]], outpath: str):
+    # Use four SNR ranges matching the figure: Low, Med-Low, Med-High, High
+    # Ranges (annotated): Low (1.6-9.8), Med-Low (9.8-13.4), Med-High (13.4-16.8), High (16.8-28.1)
+    ranges = [9.8, 13.4, 16.8, 28.1]
+    labels = [
+        'Low (1.6-9.8)',
+        'Med-Low (9.8-13.4)',
+        'Med-High (13.4-16.8)',
+        'High (16.8-28.1)'
+    ]
+
     grouped = defaultdict(list)
     for e in events:
         snr = _snr_key(e)
         ber = _bler_key(e)
         if snr is None or ber is None:
             continue
-        
-        if snr < 10.0:
-            grouped['very_low'].append(max(ber, 1e-6))
-        elif snr <= 15.0:
-            grouped['low'].append(max(ber, 1e-6))
-        elif snr <= 20.0:
-            grouped['medium'].append(max(ber, 1e-6))
-        elif snr <= 25.0:
-            grouped['high'].append(max(ber, 1e-6))
-        else:
-            grouped['very_high'].append(max(ber, 1e-6))
 
-    labels = ['very_low', 'low', 'medium', 'high', 'very_high']
+        snr_val = float(snr)
+        bval = max(ber, 1e-6)
+
+        if snr_val < ranges[0]:
+            grouped[labels[0]].append(bval)
+        elif snr_val < ranges[1]:
+            grouped[labels[1]].append(bval)
+        elif snr_val < ranges[2]:
+            grouped[labels[2]].append(bval)
+        else:
+            grouped[labels[3]].append(bval)
+
     data = [grouped.get(name, []) for name in labels]
 
     plt.figure(figsize=(7, 4))
@@ -328,24 +346,34 @@ def fig6_ber_vs_snr_box(events: List[Dict[str, Any]], outpath: str):
 
 def fig7_bler_vs_snr_box(events: List[Dict[str, Any]], outpath: str):
     """BLER vs SNR binned boxplot (prefers BLER keys)"""
+    # Same SNR ranges as Figure 6
+    ranges = [9.8, 13.4, 16.8, 28.1]
+    labels = [
+        'Low (1.6-9.8)',
+        'Med-Low (9.8-13.4)',
+        'Med-High (13.4-16.8)',
+        'High (16.8-28.1)'
+    ]
+
     grouped = defaultdict(list)
     for e in events:
         snr = _snr_key(e)
         bler = _bler_only_key(e)
         if snr is None or bler is None:
             continue
-        if snr < 10.0:
-            grouped['very_low'].append(max(bler, 1e-6))
-        elif snr <= 15.0:
-            grouped['low'].append(max(bler, 1e-6))
-        elif snr <= 20.0:
-            grouped['medium'].append(max(bler, 1e-6))
-        elif snr <= 25.0:
-            grouped['high'].append(max(bler, 1e-6))
-        else:
-            grouped['very_high'].append(max(bler, 1e-6))
 
-    labels = ['very_low', 'low', 'medium', 'high', 'very_high']
+        snr_val = float(snr)
+        bval = max(bler, 1e-6)
+
+        if snr_val < ranges[0]:
+            grouped[labels[0]].append(bval)
+        elif snr_val < ranges[1]:
+            grouped[labels[1]].append(bval)
+        elif snr_val < ranges[2]:
+            grouped[labels[2]].append(bval)
+        else:
+            grouped[labels[3]].append(bval)
+
     data = [grouped.get(name, []) for name in labels]
 
     plt.figure(figsize=(7, 4))
@@ -403,7 +431,7 @@ def fig8_normalized_spectral_efficiency(events: List[Dict[str, Any]], outpath: s
                     valid_norm_eff.append(norm_eff)
                     
         if valid_xs and valid_norm_eff:
-            plt.scatter(valid_xs, valid_norm_eff, s=18, alpha=0.8, label=mod)
+            plt.scatter(valid_xs, valid_norm_eff, s=18, alpha=0.8, label=mod, color=MOD_COLORS.get(mod, '#7f7f7f'))
 
     plt.xlabel('SNR (dB)')
     plt.ylabel('Normalized Spectral Efficiency')

@@ -67,7 +67,7 @@ def main():
     
     try:
         # Import after checking files
-        from ..amc.integrated_amc_gan import IntegratedAMCServer
+        from ..amc.integrated_amc_gan_enzo import IntegratedAMCServer
 
         metrics_host = '127.0.0.1'
         metrics_port = 5001

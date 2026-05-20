@@ -60,6 +60,12 @@ class ProductionPreprocessor:
         self.scaler_aux = None
         self.history_len = 15
         self.is_loaded = False
+        
+        # Fast-path scalars to bypass sklearn overhead
+        self.snr_mean = 0.0
+        self.snr_scale = 1.0
+        self.aux_mean = None
+        self.aux_scale = None
 
     def load_training_preprocessing(self, preprocessing_file=None):
         if preprocessing_file is None:
@@ -70,6 +76,13 @@ class ProductionPreprocessor:
             self.scaler_snr = params['scaler_snr']
             self.scaler_aux = params['scaler_aux']
             self.history_len = params['history_len']
+            
+            # Extract raw floats/arrays for lightning-fast native arithmetic
+            self.snr_mean = float(self.scaler_snr.mean_[0])
+            self.snr_scale = float(self.scaler_snr.scale_[0])
+            self.aux_mean = self.scaler_aux.mean_
+            self.aux_scale = self.scaler_aux.scale_
+            
             self.is_loaded = True
             logger.info("Training preprocessing parameters loaded successfully")
             return True
@@ -80,19 +93,27 @@ class ProductionPreprocessor:
     def normalize_history(self, snr_history):
         if not self.is_loaded:
             raise ValueError("Preprocessing not loaded")
-        return self.scaler_snr.transform(np.array(snr_history).reshape(-1, 1)).flatten()
+        # Native numpy vectorization instead of sklearn validation
+        arr = np.array(snr_history, dtype=np.float32)
+        return (arr - self.snr_mean) / self.snr_scale
 
     def normalize_aux(self, aux_features):
         if not self.is_loaded:
             raise ValueError("Preprocessing not loaded")
-        return self.scaler_aux.transform([aux_features])[0]
+        arr = np.array(aux_features, dtype=np.float32)
+        return (arr - self.aux_mean) / self.aux_scale
 
     def denormalize_snr(self, normalized_snr):
         if not self.is_loaded:
             raise ValueError("Preprocessing not loaded")
+        
+        # Fast tensor unboxing: bypasses .cpu().detach().numpy() entirely
         if isinstance(normalized_snr, torch.Tensor):
-            normalized_snr = normalized_snr.cpu().detach().numpy()
-        return self.scaler_snr.inverse_transform(normalized_snr.reshape(-1, 1)).flatten()[0]
+            val = normalized_snr.item() 
+        else:
+            val = float(normalized_snr)
+            
+        return (val * self.snr_scale) + self.snr_mean
 
     @property
     def is_fitted(self):
@@ -151,6 +172,9 @@ class IntegratedAMCServer:
         self.sionna_port = 9000
         self.prediction_threshold = 3.0
         self.event_publisher = EventPublisher()
+        
+        # Lock to serialize GPU access and prevent GIL thrashing
+        self.inference_lock = threading.Lock()
 
         self.stats = {
             'total_requests': 0,
@@ -212,8 +236,6 @@ class IntegratedAMCServer:
             current_snr = request.get('snr', 20.0)
             channel_info = request.get('channel_info', {})
 
-            logger.info(f"Processing Flow {flow_id}, SNR {current_snr:.1f}dB")
-
             flow_state = self.flow_manager.get_flow_state(flow_id)
             flow_state['snr_history'].append(current_snr)
             flow_state['channel_info'] = channel_info
@@ -241,16 +263,11 @@ class IntegratedAMCServer:
                 self.stats['predictions_used'] += 1
                 if abs(current_snr - preselected['predicted_snr']) <= self.prediction_threshold:
                     self.stats['predictions_accurate'] += 1
-
-                logger.info(f"Using GAN preselected: {selected_modulation} "
-                            f"(predicted: {preselected['predicted_snr']:.1f}dB, "
-                            f"actual: {current_snr:.1f}dB)")
             else:
                 selected_modulation = self._select_modulation_current_snr(flow_id, current_snr, channel_info)
                 decision_method = 'rl_agent_current_snr'
                 prediction_info = {'used_preselected': False}
                 self.stats['fallback_used'] += 1
-                logger.info(f"RL Agent fallback: {selected_modulation}")
 
             gan_start_time = time.time()
             self._proactive_prediction_for_next_transmission(flow_id, channel_info)
@@ -267,7 +284,6 @@ class IntegratedAMCServer:
 
             decision_latency_ms = (time.time() - start_time) * 1000
 
-            # Record performance metrics
             prediction_error = 0.0
             if preselected:
                 prediction_error = abs(current_snr - preselected['predicted_snr'])
@@ -313,12 +329,6 @@ class IntegratedAMCServer:
                 }
             }
 
-            logger.info(f"Flow {flow_id}: {selected_modulation} -> "
-                        f"BER={transmission_result.get('ber', 0):.2e}, "
-                        f"Throughput={transmission_result.get('throughput', 0):.2f}Mbps, "
-                        f"Latency={decision_latency_ms:.1f}ms")
-
-            # Publish event to metrics server
             event = {
                 'run_id': getattr(self, '_run_id', 'run-default'),
                 'config_id': getattr(self, '_config_id', 'cfg-integrated'),
@@ -359,11 +369,10 @@ class IntegratedAMCServer:
 
             history, aux = self.snr_processor.prepare_prediction_data(flow_id)
             
-            # 1. OPTIMIZATION: Do a single forward pass without confidence intervals.
-            # No try/except block, just standard fast inference.
-            raw_predicted_snr = self.gan.predict_next_snr(history, aux, return_confidence=False)
+            # Context manager locks threads and halts autograd tree generation
+            with self.inference_lock, torch.inference_mode():
+                raw_predicted_snr = self.gan.predict_next_snr(history, aux, return_confidence=False)
 
-            # Denormalize the SNR
             try:
                 predicted_snr_value = self.preprocessor.denormalize_snr(raw_predicted_snr)
             except Exception as e:
@@ -371,13 +380,9 @@ class IntegratedAMCServer:
                 self.stats['denormalization_errors'] += 1
                 normalized_val = float(raw_predicted_snr.item())
                 predicted_snr_value = 20.0 + normalized_val * 8.0
-                
-            # 2. OPTIMIZATION: Removed the heavy .cpu().numpy() tensor transfers.
-            # Only log the critical scalar value, not the entire input tensors.
-            logger.info(f"GAN Prediction Flow {flow_id} t+1: Predicted SNR={predicted_snr_value:.1f}dB")
 
             if predicted_snr_value < -5.0 or predicted_snr_value > 45.0:
-                predicted_snr_value = np.clip(predicted_snr_value, -5.0, 45.0)
+                predicted_snr_value = float(np.clip(predicted_snr_value, -5.0, 45.0))
 
             preselected_modulation = self._get_optimal_modulation_for_snr(predicted_snr_value)
 
@@ -385,9 +390,6 @@ class IntegratedAMCServer:
                 self.flow_manager.store_preselected_modulation(
                     flow_id, preselected_modulation, predicted_snr_value
                 )
-            else:
-                logger.warning(f"Unsafe prediction: {preselected_modulation} for "
-                               f"predicted SNR {predicted_snr_value:.1f}dB")
                                
         except Exception as e:
             logger.error(f"Error in proactive prediction for flow {flow_id}: {e}")
@@ -398,8 +400,6 @@ class IntegratedAMCServer:
         is_accurate = prediction_error <= self.prediction_threshold
         modulation = preselected['modulation']
         is_safe = self._validate_modulation_safety(modulation, actual_snr)
-        logger.debug(f"Prediction validation: error={prediction_error:.1f}dB, "
-                     f"threshold={self.prediction_threshold}dB, accurate={is_accurate}, safe={is_safe}")
         return is_accurate and is_safe
 
     def _select_modulation_current_snr(self, flow_id: int, snr: float, channel_info: Dict) -> str:
@@ -417,7 +417,11 @@ class IntegratedAMCServer:
             stability=0.5
         )
         normalized_state = self.rl_agent.normalize_state(state)
-        action = self.rl_agent.select_action(normalized_state, snr, training=False)
+        
+        # Serialize RL inference to prevent thread collision
+        with self.inference_lock, torch.inference_mode():
+            action = self.rl_agent.select_action(normalized_state, snr, training=False)
+            
         return self.rl_agent.actions[action]
 
     def _get_optimal_modulation_for_snr(self, snr: float) -> str:
@@ -481,7 +485,6 @@ class IntegratedAMCServer:
                 'heuristic_throughput': float(heuristic_result.get('throughput', 0.0)),
             }
         except Exception as e:
-            logger.debug(f"Sionna unavailable, using fallback: {e}")
             fallback_result = self._fallback_simulation(modulation, snr, channel_info.get('type', 'rayleigh'))
             return {
                 **fallback_result,
@@ -535,17 +538,18 @@ class IntegratedAMCServer:
                 snr=snr,
                 success=transmission_result['success']
             )
-            self.rl_agent.update_performance_metrics(
-                throughput=transmission_result['throughput'],
-                ber=transmission_result['ber'],
-                bler=transmission_result['bler'],
-                modulation=modulation,
-                reward=reward,
-                channel_type='rayleigh',
-                snr=snr,
-                success=transmission_result['success']
-            )
-            logger.debug(f"RL Update - Flow {flow_id}, Reward: {reward:.2f}")
+            
+            with self.inference_lock:
+                self.rl_agent.update_performance_metrics(
+                    throughput=transmission_result['throughput'],
+                    ber=transmission_result['ber'],
+                    bler=transmission_result['bler'],
+                    modulation=modulation,
+                    reward=reward,
+                    channel_type='rayleigh',
+                    snr=snr,
+                    success=transmission_result['success']
+                )
         except Exception as e:
             logger.error(f"Error handling feedback for flow {flow_id}: {e}")
 
@@ -610,7 +614,9 @@ class IntegratedAMCServer:
             enhanced_path = str(Path(__file__).parent.parent.parent / 'models' / 'gan' / 'enhanced_snr_gan.pth')
             self.gan.save(enhanced_path)
             logger.info(f"Enhanced GAN model saved: {enhanced_path}")
-            self.rl_agent.save_model()
+            
+            with self.inference_lock:
+                self.rl_agent.save_model()
             logger.info("RL agent model saved")
         except Exception as e:
             logger.error(f"Error saving models: {e}")
