@@ -2,8 +2,6 @@
 **/__pycache__/
 **/*.pyc
 logs/
-benchmarks/results/
-benchmarks/paper_graphs/
 sionna_server.log
 models/**/*.pth
 models/**/*.json
