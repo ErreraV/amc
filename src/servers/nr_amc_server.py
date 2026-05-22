@@ -31,6 +31,8 @@ class NRAMCServer:
     def __init__(self, host='127.0.0.1', port=9001):
         self.host = host
         self.port = port
+        self.sionna_host = '127.0.0.1'
+        self.sionna_port = 9000
         self.flow_states = {}
         self.session_start = time.time()
         self.total_requests = 0
@@ -64,6 +66,46 @@ class NRAMCServer:
                 return self.modulations[len(self.snr_bins) - 1 - i]
         return self.modulations[0]
 
+    def _simulate_transmission(self, modulation: str, snr: float, channel_info: Dict, flow_id: int) -> Dict:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3.0)
+            sock.connect((self.sionna_host, self.sionna_port))
+
+            sionna_request = {
+                "type": "amc_server",
+                "id": flow_id,
+                "k": 1024,
+                "modulation": modulation,
+                "snr_db": snr,
+                "payload": np.random.randint(0, 2, 1024).tolist(),
+                "channel_type": channel_info.get('type', 'rayleigh'),
+                "channel_params": {
+                    "carrier_frequency": channel_info.get('carrier_frequency', 2.4e9),
+                    "speed": channel_info.get('mobility_speed', 3.0),
+                    "distance": channel_info.get('distance', 100.0),
+                    "num_paths": 6,
+                    "delay_spread": 1e-6,
+                    "k_factor": 10.0,
+                    "phase_noise_std": 0.01
+                }
+            }
+
+            sock.sendall(json.dumps(sionna_request).encode())
+            response_data = sock.recv(8192)
+            sock.close()
+
+            sionna_response = json.loads(response_data.decode())
+            return {
+                'ber': float(sionna_response.get('ber', 0.0)),
+                'bler': float(sionna_response.get('bler', 0.0)),
+                'throughput': float(sionna_response.get('effective_throughput', 0.0)),
+                'success': bool(sionna_response.get('success', False))
+            }
+        except Exception as e:
+            logger.debug(f"Sionna unavailable, using fallback: {e}")
+            return self._fallback_simulation(modulation, snr, channel_info.get('type', 'rayleigh'))
+
     def _fallback_simulation(self, modulation: str, snr: float, channel_type: str) -> Dict:
         # reuse a lightweight simulation for performance estimates
         snr_linear = 10 ** (snr / 10)
@@ -93,15 +135,19 @@ class NRAMCServer:
             request_time = time.time()
             snr = float(request.get('snr', 20.0))
             flow_id = int(request.get('flow_id', 1))
-            channel_info = request.get('channnr_amc_serverel_info', {})
+            channel_info = request.get('channel_info', {})
 
             flow_state = self.get_flow_state(flow_id)
-            channel_type = channel_info.get('type', 'rayleigh')
-
+            
+            # 1. Choose Modulation (Lookup Table)
             modulation = self._choose_modulation(snr)
 
-            sim = self._fallback_simulation(modulation, snr, channel_type)
+            # 2. Query Sionna to calculate physical layer metrics and latency
+            sionna_start = time.time()
+            sim = self._simulate_transmission(modulation, snr, channel_info, flow_id)
+            sionna_latency_ms = (time.time() - sionna_start) * 1000
 
+            # 3. Update internal history
             flow_state['history']['snr'].append(snr)
             flow_state['history']['modulation'].append(modulation)
             flow_state['history']['ber'].append(sim['ber'])
@@ -127,7 +173,7 @@ class NRAMCServer:
                 }
             }
 
-            # Publish event to metrics server with same keys used elsewhere
+            # Publish event to metrics server with accurate Sionna latency
             event = {
                 'run_id': getattr(self, '_run_id', 'run-default'),
                 'config_id': getattr(self, '_config_id', 'cfg-nr-standard'),
@@ -143,7 +189,7 @@ class NRAMCServer:
                 'safety_validated': True,
                 'prediction_error': 0.0,
                 'decision_latency_ms': (time.time() - request_time) * 1000,
-                'sionna_latency_ms': 0.0,
+                'sionna_latency_ms': sionna_latency_ms,
                 'gan_latency_ms': 0.0,
                 'ber': sim['ber'],
                 'bler': sim['bler'],
