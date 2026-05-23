@@ -477,7 +477,12 @@ void SimulateTransmissionFallback(uint32_t flowId, int k, double snr_db,
     bler = std::clamp(bler, 0.0, 1.0);
 
     bool success = bler < 0.5;
-    double throughput = success ? (k * 8.0 * (1.0 - bler) * 0.001) : 0.0;
+    double base_rate = 4.0;
+    if (modulation == "qam4") base_rate = 2.0;
+    else if (modulation == "qam64") base_rate = 6.0;
+    else if (modulation == "qam256") base_rate = 8.0;
+
+    double throughput = success ? (base_rate * (1.0 - bler) * 0.85 * 50.0) : 0.0;
 
     uint32_t packetSize = k / 8;
     double delay = Simulator::Now().GetSeconds();
@@ -622,7 +627,12 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
 
                             if (!use_sionna_throughput || throughput <= 0) {
                                 if (transmission_success) {
-                                    throughput = (k * 8.0 * (1.0 - bler)) / 1000.0;
+                                    double base_rate = 4.0; // default for QAM-16
+                                    if (selectedModulation == "qam4") base_rate = 2.0;
+                                    else if (selectedModulation == "qam64") base_rate = 6.0;
+                                    else if (selectedModulation == "qam256") base_rate = 8.0;
+                                    
+                                    throughput = base_rate * (1.0 - bler) * 0.85 * 50.0;
                                     NS_LOG_WARN("Sionna throughput not available, using fallback: " << throughput);
                                 } else {
                                     throughput = 0.0;
@@ -680,8 +690,13 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
         ber *= dis(gen);
         bler *= dis(gen);
 
+        double base_rate = 4.0;
+        if (selectedModulation == "qam4") base_rate = 2.0;
+        else if (selectedModulation == "qam64") base_rate = 6.0;
+        else if (selectedModulation == "qam256") base_rate = 8.0;
+
         transmission_success = bler < 0.5;
-        throughput = transmission_success ? (k * 8.0 * (1.0 - bler) * 0.001) : 0.0;
+        throughput = transmission_success ? (base_rate * (1.0 - bler) * 0.85 * 50.0) : 0.0;
         use_sionna_throughput = false;
     }
 

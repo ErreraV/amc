@@ -209,7 +209,7 @@ class IntegratedAMCServer:
 
             if request_type == 'get_modulation':
                 response = self.process_modulation_request_with_prediction(request)
-            elif request_type == 'feedback':
+            elif request_type in ['feedback', 'feedback_only']:
                 response = self.handle_feedback(request)
             elif request_type == 'get_stats':
                 response = self.get_server_stats()
@@ -569,11 +569,20 @@ class IntegratedAMCServer:
     def handle_feedback(self, request: Dict) -> Dict:
         try:
             flow_id = request.get('flow_id', 1)
-            actual_ber = request.get('ber', 0.0)
-            actual_bler = request.get('bler', 0.0)
-            actual_throughput = request.get('throughput', 0.0)
-            modulation_used = request.get('modulation', 'qam16')
-            snr_used = request.get('snr', 20.0)
+            
+            # Resolve nested "feedback" dictionary if present
+            feedback_data = request.get('feedback', {})
+            if not isinstance(feedback_data, dict) or not feedback_data:
+                feedback_data = request
+                
+            actual_ber = feedback_data.get('ber', 0.0)
+            actual_bler = feedback_data.get('bler', 0.0)
+            actual_throughput = feedback_data.get('throughput', 0.0)
+            modulation_used = feedback_data.get('modulation', 'qam16')
+            
+            # Resolve SNR from root or nested in channel_info
+            channel_info = request.get('channel_info', {})
+            snr_used = request.get('snr', channel_info.get('snr', 20.0))
 
             flow_state = self.flow_manager.get_flow_state(flow_id)
             feedback = {
