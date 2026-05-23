@@ -163,7 +163,7 @@ class IntegratedAMCServer:
                 logger.info("Loaded default GAN model: snr_gan_model.pth")
 
             self.rl_agent.load_model()
-            logger.info("Loaded RL agent model")
+            logger.info("Loaded RL agent model (retained for safety validations)")
         except Exception as e:
             logger.warning(f"Could not load existing models: {e}")
             logger.info("Starting with fresh models")
@@ -185,7 +185,7 @@ class IntegratedAMCServer:
             'model_used': str(Path(__file__).parent.parent.parent / 'models' / 'gan' / 'enhanced_snr_gan.pth')
         }
 
-        logger.info(f"Integrated AMC Server initialized on {host}:{port}")
+        logger.info(f"Integrated AMC Server (GAN+Table variant) initialized on {host}:{port}")
         logger.info(f"SNR Preprocessor ready: {self.preprocessor.is_fitted}")
 
     def handle_client(self, conn, addr):
@@ -252,9 +252,9 @@ class IntegratedAMCServer:
             preselected = self.flow_manager.retrieve_preselected_modulation(flow_id)
 
             if preselected and self._is_prediction_still_valid(preselected, current_snr):
-                # The prediction was valid, use the RL Agent's proactively preselected modulation!
+                # The prediction was valid, use the Table's proactively preselected modulation!
                 selected_modulation = preselected['modulation']
-                decision_method = 'preselected_proactive_rl_with_gan'
+                decision_method = 'preselected_proactive_table_with_gan'
                 prediction_info = {
                     'used_preselected': True,
                     'predicted_snr': preselected['predicted_snr'],
@@ -264,13 +264,13 @@ class IntegratedAMCServer:
                 self.stats['predictions_used'] += 1
                 self.stats['predictions_accurate'] += 1
             else:
-                # The prediction failed or is missing. Use the RL Agent reactively on the current SNR.
+                # The prediction failed or is missing. Use the static Table reactively on the current SNR.
                 selected_modulation = self._select_modulation_current_snr(flow_id, current_snr, channel_info)
-                decision_method = 'rl_agent_reactive_fallback'
+                decision_method = 'rl_agent_table_reactive_fallback'
                 prediction_info = {'used_preselected': False}
                 self.stats['fallback_used'] += 1
 
-            # Trigger the GAN + RL proactive prediction for the NEXT packet
+            # Trigger the GAN + Table proactive prediction for the NEXT packet
             gan_start_time = time.time()
             self._proactive_prediction_for_next_transmission(flow_id, channel_info)
             gan_latency_ms = (time.time() - gan_start_time) * 1000
@@ -334,8 +334,8 @@ class IntegratedAMCServer:
             event = {
                 'run_id': getattr(self, '_run_id', 'run-default'),
                 'config_id': getattr(self, '_config_id', 'cfg-integrated'),
-                'model_mode': 'integrated_gan_rl',
-                'model_name': 'Integrated AMC (GAN+RL)',
+                'model_mode': 'integrated_gan_table',
+                'model_name': 'Integrated AMC (GAN+Table)',
                 'timestamp': time.time(),
                 'flow_id': flow_id,
                 'request_id': f"{flow_id}-{int(flow_state['packet_count'])}",
@@ -386,27 +386,10 @@ class IntegratedAMCServer:
             if predicted_snr_value < -15.0 or predicted_snr_value > 65.0:
                 predicted_snr_value = float(np.clip(predicted_snr_value, -15.0, 65.0))
 
-            # 2. RL Agent uses the Future SNR to make a proactive decision
-            flow_state = self.flow_manager.get_flow_state(flow_id)
-            avg_ber = np.mean([fb.get('ber', 1e-6) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 1e-6
-            avg_bler = np.mean([fb.get('bler', 0.1) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 0.1
+            # 2. Use Static Threshold Table to make a proactive decision on future SNR
+            preselected_modulation = self._get_optimal_modulation_for_snr(predicted_snr_value)
 
-            state = self.rl_agent.encode_state(
-                snr=predicted_snr_value,
-                ber=avg_ber,
-                bler=avg_bler,
-                channel_type=channel_info.get('type', 'rayleigh'),
-                mobility=channel_info.get('mobility_speed', 3.0),
-                distance=channel_info.get('distance', 100.0),
-                stability=0.5
-            )
-            normalized_state = self.rl_agent.normalize_state(state)
-            
-            with self.inference_lock, torch.inference_mode():
-                action_idx = self.rl_agent.select_action(normalized_state, predicted_snr_value, training=False)
-                preselected_modulation = self.rl_agent.actions[action_idx]
-
-            # 3. Store both the predicted SNR and the RL Agent's chosen modulation
+            # 3. Store both the predicted SNR and the chosen modulation
             if self._validate_modulation_safety(preselected_modulation, predicted_snr_value):
                 self.flow_manager.store_preselected_modulation(
                     flow_id, preselected_modulation, predicted_snr_value
@@ -424,25 +407,17 @@ class IntegratedAMCServer:
         return is_accurate and is_safe
 
     def _select_modulation_current_snr(self, flow_id: int, snr: float, channel_info: Dict) -> str:
-        flow_state = self.flow_manager.get_flow_state(flow_id)
-        avg_ber = np.mean([fb.get('ber', 1e-6) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 1e-6
-        avg_bler = np.mean([fb.get('bler', 0.1) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 0.1
+        return self._get_optimal_modulation_for_snr(snr)
 
-        state = self.rl_agent.encode_state(
-            snr=snr,
-            ber=avg_ber,
-            bler=avg_bler,
-            channel_type=channel_info.get('type', 'rayleigh'),
-            mobility=channel_info.get('mobility_speed', 3.0),
-            distance=channel_info.get('distance', 100.0),
-            stability=0.5
-        )
-        normalized_state = self.rl_agent.normalize_state(state)
-        
-        with self.inference_lock, torch.inference_mode():
-            action = self.rl_agent.select_action(normalized_state, snr, training=False)
-            
-        return self.rl_agent.actions[action]
+    def _get_optimal_modulation_for_snr(self, snr: float) -> str:
+        if snr >= 22:
+            return 'qam256'
+        elif snr >= 15:
+            return 'qam64'
+        elif snr >= 8:
+            return 'qam16'
+        else:
+            return 'qam4'
 
     def _validate_modulation_safety(self, modulation: str, snr: float) -> bool:
         action_mapping = {'qam4': 0, 'qam16': 1, 'qam64': 2, 'qam256': 3}
@@ -495,7 +470,7 @@ class IntegratedAMCServer:
                 'heuristic_throughput': float(heuristic_result.get('throughput', 0.0)),
             }
         except Exception as e:
-            fallback_result = self._fallback_simulation(modulation, snr, channel_info.get('type', 'rayleigh'))
+            fallback_result = self._fallback_simulation(modulation, snr, channel_type=channel_info.get('type', 'rayleigh'))
             return {
                 **fallback_result,
                 'source': 'fallback',
@@ -537,7 +512,7 @@ class IntegratedAMCServer:
         }
 
     def _handle_transmission_feedback(self, flow_id: int, transmission_result: Dict,
-                                      modulation: str, snr: float):
+                                       modulation: str, snr: float):
         try:
             reward = self.rl_agent.calculate_adaptive_reward(
                 throughput=transmission_result['throughput'],
@@ -639,7 +614,7 @@ class IntegratedAMCServer:
             sock.bind((self.host, self.port))
             sock.listen(10)
 
-            logger.info(f"Integrated Enhanced GAN-AMC Server started on {self.host}:{self.port}")
+            logger.info(f"Integrated Enhanced GAN-AMC Server (GAN+Table variant) started on {self.host}:{self.port}")
             logger.info(f"Prediction accuracy threshold: {self.prediction_threshold} dB")
             logger.info(f"Preprocessor status: {'FITTED' if self.preprocessor.is_fitted else 'NOT_LOADED'}")
 
