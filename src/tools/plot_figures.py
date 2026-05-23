@@ -489,6 +489,23 @@ def main(argv=None):
     run_dir = base_outdir / f'figures_1_to_8_{timestamp}_{model_name}'
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    summary = {
+        'metadata': {
+            'metrics_base_url': args.metrics_url.rstrip('/'),
+            'window_size': args.window,
+            'poll_interval_s': args.interval,
+            'sample_count': len(events),
+            'start_timestamp': events[0].get('timestamp') if events else None,
+            'end_timestamp': events[-1].get('timestamp') if events else None,
+            'final_model_name': model_name,
+        },
+        'events': events,
+    }
+
+    summary_file = run_dir / 'benchmark_summary.json'
+    with open(summary_file, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, indent=2)
+
     if 1 in args.fig:
         out = os.path.join(run_dir, 'figure1_decision_latency.png')
         try:
@@ -553,6 +570,7 @@ def main(argv=None):
         except Exception as e:
             print(f"Skipped Figure 8: {e}")
 
+    print(f'Wrote {summary_file}')
     print(f'Figures saved in {run_dir}')
 
 

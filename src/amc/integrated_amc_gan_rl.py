@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class FlowStateManager:
     def __init__(self):
         self.flow_states = {}
-        self.predicted_snrs = {}
+        self.preselected_modulations = {}
 
     def get_flow_state(self, flow_id: int) -> Dict:
         if flow_id not in self.flow_states:
@@ -43,14 +43,15 @@ class FlowStateManager:
             }
         return self.flow_states[flow_id]
 
-    def store_predicted_snr(self, flow_id: int, predicted_snr: float):
-        self.predicted_snrs[flow_id] = {
+    def store_preselected_modulation(self, flow_id: int, modulation: str, predicted_snr: float):
+        self.preselected_modulations[flow_id] = {
+            'modulation': modulation,
             'predicted_snr': predicted_snr,
             'timestamp': time.time()
         }
 
-    def retrieve_predicted_snr(self, flow_id: int) -> Optional[Dict]:
-        return self.predicted_snrs.get(flow_id)
+    def retrieve_preselected_modulation(self, flow_id: int) -> Optional[Dict]:
+        return self.preselected_modulations.get(flow_id)
 
 
 class ProductionPreprocessor:
@@ -248,32 +249,29 @@ class IntegratedAMCServer:
                 channel_stability=channel_info.get('channel_stability', 0.5)
             )
 
-            prediction_record = self.flow_manager.retrieve_predicted_snr(flow_id)
+            preselected = self.flow_manager.retrieve_preselected_modulation(flow_id)
 
-            if prediction_record and self._is_prediction_still_valid(prediction_record, current_snr):
-                # TRUE ARCHITECTURE: The GAN predicted the future accurately. 
-                # Use the predicted future SNR as the state for the DRL agent!
-                decision_snr = prediction_record['predicted_snr']
-                decision_method = 'drl_agent_with_gan_prediction'
+            if preselected and self._is_prediction_still_valid(preselected, current_snr):
+                # The prediction was valid, use the RL Agent's proactively preselected modulation!
+                selected_modulation = preselected['modulation']
+                decision_method = 'proactive_rl_with_gan'
                 prediction_info = {
-                    'used_prediction': True,
-                    'predicted_snr': decision_snr,
+                    'used_preselected': True,
+                    'predicted_snr': preselected['predicted_snr'],
                     'actual_snr': current_snr,
-                    'prediction_error': abs(current_snr - decision_snr)
+                    'prediction_error': abs(current_snr - preselected['predicted_snr'])
                 }
                 self.stats['predictions_used'] += 1
-                self.stats['predictions_accurate'] += 1
+                if abs(current_snr - preselected['predicted_snr']) <= self.prediction_threshold:
+                    self.stats['predictions_accurate'] += 1
             else:
-                # The prediction was missing or too inaccurate. 
-                # Fallback to the current SNR for the DRL agent.
-                decision_snr = current_snr
-                decision_method = 'drl_agent_current_snr'
-                prediction_info = {'used_prediction': False}
+                # The prediction failed or is missing. Use the RL Agent reactively on the current SNR.
+                selected_modulation = self._select_modulation_current_snr(flow_id, current_snr, channel_info)
+                decision_method = 'reactive_rl_fallback'
+                prediction_info = {'used_preselected': False}
                 self.stats['fallback_used'] += 1
 
-            # The RL Agent actually makes the final decision
-            selected_modulation = self._select_modulation(flow_id, decision_snr, channel_info)
-
+            # Trigger the GAN + RL proactive prediction for the NEXT packet
             gan_start_time = time.time()
             self._proactive_prediction_for_next_transmission(flow_id, channel_info)
             gan_latency_ms = (time.time() - gan_start_time) * 1000
@@ -290,14 +288,14 @@ class IntegratedAMCServer:
             decision_latency_ms = (time.time() - start_time) * 1000
 
             prediction_error = 0.0
-            if prediction_record:
-                prediction_error = abs(current_snr - prediction_record['predicted_snr'])
+            if preselected:
+                prediction_error = abs(current_snr - preselected['predicted_snr'])
             
             metrics = PerformanceMetrics(
                 timestamp=time.time(),
                 flow_id=flow_id,
                 decision_method=decision_method,
-                predicted_snr=prediction_record['predicted_snr'] if prediction_record else current_snr,
+                predicted_snr=preselected['predicted_snr'] if preselected else current_snr,
                 actual_snr=current_snr,
                 prediction_error=prediction_error,
                 selected_modulation=selected_modulation,
@@ -374,7 +372,7 @@ class IntegratedAMCServer:
 
             history, aux = self.snr_processor.prepare_prediction_data(flow_id)
             
-            # Context manager locks threads and halts autograd tree generation
+            # 1. GAN Predicts Future SNR
             with self.inference_lock, torch.inference_mode():
                 raw_predicted_snr = self.gan.predict_next_snr(history, aux, return_confidence=False)
 
@@ -389,24 +387,50 @@ class IntegratedAMCServer:
             if predicted_snr_value < -15.0 or predicted_snr_value > 65.0:
                 predicted_snr_value = float(np.clip(predicted_snr_value, -15.0, 65.0))
 
-            # Store only the predicted SNR so the RL Agent can evaluate it later
-            self.flow_manager.store_predicted_snr(flow_id, predicted_snr_value)
+            # 2. RL Agent uses the Future SNR to make a proactive decision
+            flow_state = self.flow_manager.get_flow_state(flow_id)
+            avg_ber = np.mean([fb.get('ber', 1e-6) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 1e-6
+            avg_bler = np.mean([fb.get('bler', 0.1) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 0.1
+
+            state = self.rl_agent.encode_state(
+                snr=predicted_snr_value,
+                ber=avg_ber,
+                bler=avg_bler,
+                channel_type=channel_info.get('type', 'rayleigh'),
+                mobility=channel_info.get('mobility_speed', 3.0),
+                distance=channel_info.get('distance', 100.0),
+                stability=0.5
+            )
+            normalized_state = self.rl_agent.normalize_state(state)
+            
+            with self.inference_lock, torch.inference_mode():
+                action_idx = self.rl_agent.select_action(normalized_state, predicted_snr_value, training=False)
+                preselected_modulation = self.rl_agent.actions[action_idx]
+
+            # 3. Store both the predicted SNR and the RL Agent's chosen modulation
+            if self._validate_modulation_safety(preselected_modulation, predicted_snr_value):
+                self.flow_manager.store_preselected_modulation(
+                    flow_id, preselected_modulation, predicted_snr_value
+                )
                                
         except Exception as e:
             logger.error(f"Error in proactive prediction for flow {flow_id}: {e}")
 
-    def _is_prediction_still_valid(self, prediction_record: Dict, actual_snr: float) -> bool:
-        predicted_snr = prediction_record['predicted_snr']
+    def _is_prediction_still_valid(self, preselected: Dict, actual_snr: float) -> bool:
+        predicted_snr = preselected['predicted_snr']
         prediction_error = abs(actual_snr - predicted_snr)
-        return prediction_error <= self.prediction_threshold 
+        is_accurate = prediction_error <= self.prediction_threshold
+        modulation = preselected['modulation']
+        is_safe = self._validate_modulation_safety(modulation, actual_snr)
+        return is_accurate and is_safe
 
-    def _select_modulation(self, flow_id: int, decision_snr: float, channel_info: Dict) -> str:
+    def _select_modulation_current_snr(self, flow_id: int, snr: float, channel_info: Dict) -> str:
         flow_state = self.flow_manager.get_flow_state(flow_id)
         avg_ber = np.mean([fb.get('ber', 1e-6) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 1e-6
         avg_bler = np.mean([fb.get('bler', 0.1) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 0.1
 
         state = self.rl_agent.encode_state(
-            snr=decision_snr,
+            snr=snr,
             ber=avg_ber,
             bler=avg_bler,
             channel_type=channel_info.get('type', 'rayleigh'),
@@ -416,9 +440,8 @@ class IntegratedAMCServer:
         )
         normalized_state = self.rl_agent.normalize_state(state)
         
-        # Serialize RL inference to prevent thread collision
         with self.inference_lock, torch.inference_mode():
-            action = self.rl_agent.select_action(normalized_state, decision_snr, training=False)
+            action = self.rl_agent.select_action(normalized_state, snr, training=False)
             
         return self.rl_agent.actions[action]
 
@@ -564,7 +587,7 @@ class IntegratedAMCServer:
             'prediction_accuracy_rate': float(prediction_accuracy),
             'prediction_threshold_db': float(self.prediction_threshold),
             'active_flows': len(self.flow_manager.flow_states),
-            'cached_preselections': len(self.flow_manager.predicted_snrs),
+            'cached_preselections': len(self.flow_manager.preselected_modulations),
             'model_used': self.stats['model_used'],
             'preprocessor_fitted': self.preprocessor.is_fitted
         }
