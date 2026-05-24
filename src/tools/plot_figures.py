@@ -132,7 +132,6 @@ def fig1_decision_latency_hist(events: List[Dict[str, Any]], outpath: str):
     plt.hist(samples, bins=50, color='#4c72b0', edgecolor='k', alpha=0.9)
     plt.xlabel('Decision latency (ms)')
     plt.ylabel('Count')
-    plt.title('Decision latency distribution')
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
     plt.savefig(outpath, dpi=150)
@@ -172,7 +171,6 @@ def fig2_prediction_accuracy(events: List[Dict[str, Any]], outpath: str, window:
     plt.grid(alpha=0.3)
 
     plt.legend(loc='upper right')
-    plt.title('Prediction accuracy over time')
     plt.tight_layout()
     plt.savefig(outpath, dpi=150)
     plt.close()
@@ -209,7 +207,6 @@ def fig3_throughput_by_modulation(events: List[Dict[str, Any]], outpath: str):
 
     plt.ylabel('Throughput (Mbps)')
     plt.xlabel('Modulation')
-    plt.title('Throughput distribution per modulation')
     plt.grid(axis='y', alpha=0.3)
     # overlay means
     means = [np.mean(d) if d else 0.0 for d in data]
@@ -250,7 +247,6 @@ def fig4_throughput_vs_snr(events: List[Dict[str, Any]], outpath: str):
 
     plt.xlabel('SNR (dB)')
     plt.ylabel('Throughput (Mbps)')
-    plt.title('Throughput across SNR (by modulation)')
     plt.legend(title='Modulation')
     plt.grid(alpha=0.25)
     plt.tight_layout()
@@ -279,7 +275,6 @@ def fig5_spectral_efficiency(events: List[Dict[str, Any]], outpath: str, bandwid
 
     plt.xlabel('SNR (dB)')
     plt.ylabel('Spectral efficiency (bits/s/Hz)')
-    plt.title(f'Spectral efficiency ({bandwidth_mhz} MHz bandwidth)')
     plt.legend()
     plt.grid(alpha=0.25)
     plt.tight_layout()
@@ -327,7 +322,6 @@ def fig6_ber_vs_snr_box(events: List[Dict[str, Any]], outpath: str):
     plt.yscale('log')
     plt.ylabel('BER')
     plt.xlabel('SNR category')
-    plt.title('BER versus SNR (binned)')
     plt.xticks(rotation=25, ha='right')
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
@@ -375,7 +369,6 @@ def fig7_bler_vs_snr_box(events: List[Dict[str, Any]], outpath: str):
     plt.yscale('linear')
     plt.ylabel('BLER')
     plt.xlabel('SNR category')
-    plt.title('BLER versus SNR (binned)')
     plt.xticks(rotation=25, ha='right')
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
@@ -421,7 +414,6 @@ def fig8_normalized_spectral_efficiency(events: List[Dict[str, Any]], outpath: s
 
     plt.xlabel('SNR (dB)')
     plt.ylabel('Normalized Spectral Efficiency')
-    plt.title('Normalized Spectral Efficiency')
     plt.legend()
     plt.grid(alpha=0.25)
     plt.tight_layout()

@@ -68,10 +68,10 @@ class AdvancedQLearningAgent:
         }
 
         self.snr_safety_rules = {
-            "qam4":   {"min_snr": -10, "max_snr": 10},
-            "qam16":  {"min_snr": 8,   "max_snr": 18},
-            "qam64":  {"min_snr": 15,  "max_snr": 25},
-            "qam256": {"min_snr": 20,  "max_snr": 50}
+            "qam4":   {"min_snr": -10, "max_snr": 5},
+            "qam16":  {"min_snr": 1.5, "max_snr": 12},
+            "qam64":  {"min_snr": 8.5, "max_snr": 20},
+            "qam256": {"min_snr": 15.5, "max_snr": 50}
         }
 
         self.confidence_threshold = 0.7
@@ -172,7 +172,7 @@ class AdvancedQLearningAgent:
             reward < -50 or
             not self._is_action_safe(action, snr) or
             (snr > 25 and action == 0) or
-            (snr < 12 and action >= 2)
+            (snr < 8.5 and action >= 2)
         )
         self.recent_bad_choices.append(1.0 if is_bad_choice else 0.0)
         if len(self.recent_bad_choices) > self.max_bad_choices_history:
@@ -261,7 +261,7 @@ class AdvancedQLearningAgent:
 
         snr_mod_reward = 0
 
-        if snr >= 24:
+        if snr >= 16:
             if modulation == "qam256":
                 snr_mod_reward = 50
             elif modulation == "qam64":
@@ -271,7 +271,7 @@ class AdvancedQLearningAgent:
             else:
                 snr_mod_reward = -60
 
-        elif snr >= 20:
+        elif snr >= 12:
             if modulation == "qam64":
                 snr_mod_reward = 45
             elif modulation == "qam256":
@@ -281,7 +281,7 @@ class AdvancedQLearningAgent:
             else:
                 snr_mod_reward = -30
 
-        elif snr >= 15:
+        elif snr >= 8:
             if modulation == "qam16":
                 snr_mod_reward = 40
             elif modulation == "qam64":
@@ -291,7 +291,7 @@ class AdvancedQLearningAgent:
             else:
                 snr_mod_reward = -10
 
-        elif snr >= 10:
+        elif snr >= 3:
             if modulation == "qam16":
                 snr_mod_reward = 35
             elif modulation == "qam4":

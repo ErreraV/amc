@@ -485,11 +485,11 @@ class IntegratedAMCServer:
             return mod
 
     def _get_optimal_modulation_for_snr(self, snr: float) -> str:
-        if snr >= 22:
+        if snr >= 15.5:
             return 'qam256'
-        elif snr >= 15:
+        elif snr >= 8.5:
             return 'qam64'
-        elif snr >= 8:
+        elif snr >= 1.5:
             return 'qam16'
         else:
             return 'qam4'
