@@ -405,6 +405,8 @@ class IntegratedAMCServer:
             if predicted_snr_value < -15.0 or predicted_snr_value > 65.0:
                 predicted_snr_value = float(np.clip(predicted_snr_value, -15.0, 65.0))
 
+            logger.info(f"[GAN Prediction] Flow {flow_id} predicted future SNR: {predicted_snr_value:.2f} dB")
+
             # 2. Make a proactive decision on future SNR using Table or RL
             if self.method == 'table':
                 preselected_modulation = self._get_optimal_modulation_for_snr(predicted_snr_value)
@@ -430,9 +432,12 @@ class IntegratedAMCServer:
 
             # 3. Store both the predicted SNR and the chosen modulation
             if self._validate_modulation_safety(preselected_modulation, predicted_snr_value):
+                logger.info(f"[Proactive Decision] Flow {flow_id} preselected modulation {preselected_modulation} (Method: {self.method.upper()})")
                 self.flow_manager.store_preselected_modulation(
                     flow_id, preselected_modulation, predicted_snr_value
                 )
+            else:
+                logger.info(f"[Proactive Decision] Flow {flow_id} preselected modulation {preselected_modulation} failed safety check.")
                                
         except Exception as e:
             logger.error(f"Error in proactive prediction for flow {flow_id}: {e}")
@@ -443,11 +448,19 @@ class IntegratedAMCServer:
         is_accurate = prediction_error <= self.prediction_threshold
         modulation = preselected['modulation']
         is_safe = self._validate_modulation_safety(modulation, actual_snr)
+        
+        if is_accurate and is_safe:
+            logger.info(f"[Validation] Prediction valid. Error: {prediction_error:.2f} dB <= {self.prediction_threshold} dB. Modulation {modulation} is safe.")
+        else:
+            logger.info(f"[Validation] Prediction invalid. Error: {prediction_error:.2f} dB (Accurate: {is_accurate}, Safe: {is_safe}).")
+            
         return is_accurate and is_safe
 
     def _select_modulation_current_snr(self, flow_id: int, snr: float, channel_info: Dict) -> str:
         if self.method == 'table':
-            return self._get_optimal_modulation_for_snr(snr)
+            mod = self._get_optimal_modulation_for_snr(snr)
+            logger.info(f"[Reactive Decision] Flow {flow_id} selected {mod} using TABLE at SNR {snr:.2f} dB")
+            return mod
         else: # RL
             flow_state = self.flow_manager.get_flow_state(flow_id)
             avg_ber = np.mean([fb.get('ber', 1e-6) for fb in flow_state['feedback_history']]) if flow_state['feedback_history'] else 1e-6
@@ -467,7 +480,9 @@ class IntegratedAMCServer:
             with self.inference_lock, torch.inference_mode():
                 action = self.rl_agent.select_action(normalized_state, snr, training=False)
                 
-            return self.rl_agent.actions[action]
+            mod = self.rl_agent.actions[action]
+            logger.info(f"[Reactive Decision] Flow {flow_id} selected {mod} using RL at SNR {snr:.2f} dB")
+            return mod
 
     def _get_optimal_modulation_for_snr(self, snr: float) -> str:
         if snr >= 22:
