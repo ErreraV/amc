@@ -573,30 +573,31 @@ class IntegratedAMCServer:
 
     def _handle_transmission_feedback(self, flow_id: int, transmission_result: Dict,
                                        modulation: str, snr: float):
-        try:
-            reward = self.rl_agent.calculate_adaptive_reward(
-                throughput=transmission_result['throughput'],
-                ber=transmission_result['ber'],
-                bler=transmission_result['bler'],
-                modulation=modulation,
-                channel_type='rayleigh',
-                snr=snr,
-                success=transmission_result['success']
-            )
+        # try:
+        #     reward = self.rl_agent.calculate_adaptive_reward(
+        #         throughput=transmission_result['throughput'],
+        #         ber=transmission_result['ber'],
+        #         bler=transmission_result['bler'],
+        #         modulation=modulation,
+        #         channel_type='rayleigh',
+        #         snr=snr,
+        #         success=transmission_result['success']
+        #     )
             
-            with self.inference_lock:
-                self.rl_agent.update_performance_metrics(
-                    throughput=transmission_result['throughput'],
-                    ber=transmission_result['ber'],
-                    bler=transmission_result['bler'],
-                    modulation=modulation,
-                    reward=reward,
-                    channel_type='rayleigh',
-                    snr=snr,
-                    success=transmission_result['success']
-                )
-        except Exception as e:
-            logger.error(f"Error handling feedback for flow {flow_id}: {e}")
+        #     with self.inference_lock:
+        #         self.rl_agent.update_performance_metrics(
+        #             throughput=transmission_result['throughput'],
+        #             ber=transmission_result['ber'],
+        #             bler=transmission_result['bler'],
+        #             modulation=modulation,
+        #             reward=reward,
+        #             channel_type='rayleigh',
+        #             snr=snr,
+        #             success=transmission_result['success']
+        #         )
+        # except Exception as e:
+        #     logger.error(f"Error handling feedback for flow {flow_id}: {e}")
+        pass
 
     def _emergency_fallback(self, flow_id: int, snr: float) -> Dict:
         safe_modulation = 'qam4' if snr < 15 else 'qam16'
