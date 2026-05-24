@@ -142,8 +142,12 @@ def fig1_decision_latency_hist(events: List[Dict[str, Any]], outpath: str):
 def fig2_prediction_accuracy(events: List[Dict[str, Any]], outpath: str, window: int = 50):
     # sort by timestamp
     events_sorted = sorted([e for e in events if 'prediction_error' in e and 'timestamp' in e], key=lambda x: x['timestamp'])
+    
+    # Discard the first 150 samples to only consider data where predictions are actively used
+    events_sorted = events_sorted[150:]
+    
     if not events_sorted:
-        raise RuntimeError('No events with prediction_error+timestamp found')
+        raise RuntimeError('No events with prediction_error+timestamp found after discarding initial samples')
 
     errors = [float(e.get('prediction_error', 1e9)) for e in events_sorted]
     times = [float(e['timestamp']) for e in events_sorted]
@@ -321,14 +325,9 @@ def fig6_ber_vs_snr_box(events: List[Dict[str, Any]], outpath: str):
         patch.set_facecolor('#d3d3d3')
 
     plt.yscale('log')
-    plt.ylabel('BER (log scale)')
+    plt.ylabel('BER')
     plt.xlabel('SNR category')
     plt.title('BER versus SNR (binned)')
-    try:
-        # Changed lower bound to 1e-6 to show perfect packets
-        plt.ylim(1e-6, 1e-0)
-    except Exception:
-        pass
     plt.xticks(rotation=25, ha='right')
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
@@ -373,15 +372,10 @@ def fig7_bler_vs_snr_box(events: List[Dict[str, Any]], outpath: str):
     for patch in b['boxes']:
         patch.set_facecolor('#d3d3d3')
 
-    plt.yscale('log')
-    plt.ylabel('BLER (log scale)')
+    plt.yscale('linear')
+    plt.ylabel('BLER')
     plt.xlabel('SNR category')
     plt.title('BLER versus SNR (binned)')
-    try:
-        # Changed lower bound to 1e-6 to show perfect packets
-        plt.ylim(1e-6, 1e-0)
-    except Exception:
-        pass
     plt.xticks(rotation=25, ha='right')
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
@@ -433,6 +427,61 @@ def fig8_normalized_spectral_efficiency(events: List[Dict[str, Any]], outpath: s
     plt.tight_layout()
     plt.savefig(outpath, dpi=150)
     plt.close()
+
+
+def calculate_averages_and_save(events: List[Dict[str, Any]], outpath: str, bandwidth_mhz: float = 50.0):
+    total_ber, count_ber = 0.0, 0
+    total_bler, count_bler = 0.0, 0
+    total_thr, count_thr = 0.0, 0
+    total_spec_eff, count_spec_eff = 0.0, 0
+    total_norm_eff, count_norm_eff = 0.0, 0
+    total_lat, count_lat = 0.0, 0
+    
+    for e in events:
+        ber = _bler_key(e)
+        if ber is not None:
+            total_ber += ber
+            count_ber += 1
+            
+        bler = _bler_only_key(e)
+        if bler is not None:
+            total_bler += bler
+            count_bler += 1
+            
+        thr = _throughput_key(e)
+        if thr is not None:
+            total_thr += thr
+            count_thr += 1
+            
+            snr = _snr_key(e)
+            if snr is not None:
+                true_eff = thr / bandwidth_mhz
+                total_spec_eff += true_eff
+                count_spec_eff += 1
+                
+                snr_linear = 10 ** (snr / 10.0)
+                shannon_limit = math.log2(1 + snr_linear)
+                if shannon_limit > 0:
+                    norm_eff = true_eff / shannon_limit
+                    total_norm_eff += norm_eff
+                    count_norm_eff += 1
+                    
+        lat = e.get('decision_latency_ms')
+        if lat is not None:
+            total_lat += _to_float(lat)
+            count_lat += 1
+            
+    averages = {
+        "average_ber": total_ber / count_ber if count_ber > 0 else 0.0,
+        "average_bler": total_bler / count_bler if count_bler > 0 else 0.0,
+        "average_throughput_mbps": total_thr / count_thr if count_thr > 0 else 0.0,
+        "average_spectral_efficiency": total_spec_eff / count_spec_eff if count_spec_eff > 0 else 0.0,
+        "average_normalized_spectral_efficiency": total_norm_eff / count_norm_eff if count_norm_eff > 0 else 0.0,
+        "average_latency_ms": total_lat / count_lat if count_lat > 0 else 0.0
+    }
+    
+    with open(outpath, 'w', encoding='utf-8') as f:
+        json.dump(averages, f, indent=2)
 
 
 def main(argv=None):
@@ -497,6 +546,13 @@ def main(argv=None):
     summary_file = run_dir / 'benchmark_summary.json'
     with open(summary_file, 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=2)
+
+    averages_file = os.path.join(run_dir, 'averages.json')
+    try:
+        calculate_averages_and_save(events, averages_file)
+        print(f'Wrote {averages_file}')
+    except Exception as e:
+        print(f"Skipped averages calculation: {e}")
 
     if 1 in args.fig:
         out = os.path.join(run_dir, 'figure1_decision_latency.png')
