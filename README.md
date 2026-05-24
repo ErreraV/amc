@@ -1,5 +1,12 @@
 # Notes
 
+### SSH commmand to run the amc on the server and benchmarks locally
+
+```bash
+ssh -R 5001:localhost:5001 username@server
+```
+
+
 
 ### ns3 Build+Install
 This was made to work properly with the pre-built python ns3 wrapper
