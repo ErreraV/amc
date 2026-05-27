@@ -1,4 +1,5 @@
 {
+  "model": "Integrated_AMC__GAN_TABLE",
   "average_ber": 0.0148932375472973,
   "average_bler": 0.3160472972972973,
   "average_throughput_mbps": 81.23242567567561,

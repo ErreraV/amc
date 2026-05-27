@@ -1,5 +1,13 @@
-#!/usr/bin/env python3
-"""Send repeated get_modulation TCP requests to AMC server for testing."""
+"""Send repeated get_modulation TCP requests to AMC server for testing.
+
+Description:
+    Simple TCP client that repeatedly sends `get_modulation` requests to the
+    AMC server. Useful to generate traffic for end-to-end tests and benchmarks.
+
+How to run:
+    From the repository root with your virtualenv active:
+        python src/amc/src/tools/send_modulation_requests.py --host 127.0.0.1 --port 9001 --duration 10
+"""
 import socket
 import json
 import time

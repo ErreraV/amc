@@ -1,3 +1,17 @@
+"""Asynchronous event publisher used by services to record and forward events.
+
+Description:
+    Provides `EventPublisher` which queues events, writes JSONL to disk and
+    POSTs events to a metrics server in the background.
+
+How to use:
+    Import and construct `EventPublisher` in the process that produces events:
+        from src.tools.event_publisher import EventPublisher
+        pub = EventPublisher(server_url='http://127.0.0.1:5001/ingest_event')
+
+The publisher starts a background thread automatically.
+"""
+
 import threading
 import queue
 import requests

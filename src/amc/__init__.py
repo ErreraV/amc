@@ -1,1 +1,0 @@
-# AMC models and utilities

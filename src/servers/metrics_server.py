@@ -1,5 +1,17 @@
-#!/usr/bin/env python3
-"""Metrics server: ingest raw events and expose raw event distribution APIs."""
+"""Metrics server: ingest raw events and expose raw event distribution APIs.
+
+Description:
+    Lightweight Flask server that accepts JSON events at `/ingest_event` and
+    provides API endpoints for retrieving recent events and basic health
+    information used by the dashboard and plotting tools.
+
+How to run:
+    From the repository root with your virtualenv active:
+        python src/amc/src/servers/metrics_server.py
+
+    Or use the runner script which starts metrics + dashboard together:
+        python src/amc/src/runners/run_dashboard_metrics.py
+"""
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from collections import deque

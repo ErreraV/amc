@@ -1,8 +1,12 @@
-#!/usr/bin/env python3
-"""
-RL Agent Model Benchmark
+"""RL Agent Model Benchmark
 Measures inference time and resource consumption for AdvancedQLearningAgent model
 Generates histograms and performance statistics
+
+How to run:
+    From the repository root with your virtualenv active (ensure `src` added to PYTHONPATH):
+        python src/amc/benchmarks/RL_agent_benchmark.py
+
+    The script may accept command-line args; run with `--help` if available.
 """
 
 import torch

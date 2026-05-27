@@ -1,5 +1,16 @@
-#!/usr/bin/env python3
-"""Debug script to test analyzer connection in dashboard."""
+"""Debug script to test analyzer connection in dashboard.
+
+Description:
+    Small debug utility that creates a `RealtimeAnalyzer` instance, injects
+    synthetic performance metrics and exercises the dashboard's endpoints to
+    validate analyzer integration.
+
+How to run:
+    From the repository root with your virtualenv active:
+        python src/amc/src/tools/debug_analyzer.py
+
+    This is intended as a quick local test (it exits on import failure).
+"""
 
 import sys
 import time

@@ -1,8 +1,15 @@
-#!/usr/bin/env python3
-"""
-Test script to verify the full analytics flow.
-This script simulates requests to the AMC server and monitors the analyzer.
-Run this in parallel with run_amc_with_analytics.py to verify data flows to dashboard.
+"""Test script to verify the full analytics flow.
+
+Description:
+    Simulates modulation requests to the AMC server and observes analyzer
+    behaviour to validate end-to-end analytics plumbing.
+
+How to run:
+    From the repository root with your virtualenv active:
+        python src/amc/src/tools/test_analytics_flow.py
+
+    Run it in parallel with the integrated server runner
+        python src/amc/src/runners/run_amc_with_analytics.py
 """
 
 import sys

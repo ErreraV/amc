@@ -1,5 +1,15 @@
-#!/usr/bin/env python3
-"""Minimal test of dashboard analyzer initialization."""
+"""Minimal test of dashboard analyzer initialization.
+
+Description:
+    Creates a `RealtimeAnalyzer` with synthetic data and verifies the Flask
+    dashboard can accept and use it via configuration.
+
+How to run:
+    From the repository root with your virtualenv active:
+        python src/amc/src/tools/test_dashboard_config.py
+
+    Intended to be run locally (uses Flask test client).
+"""
 
 import sys
 import json

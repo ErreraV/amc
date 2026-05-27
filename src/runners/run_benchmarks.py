@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """Runner: start metrics server, dashboard, and plot figures.
 
 Run from workspace root with the venv activated:
-  python src/amc_/src/runners/run_benchmarks.py
+    python src/amc_/src/runners/run_benchmarks.py
 
 This script starts the metrics server on port 5001, the dashboard on port 5000,
 and then runs the plot_figures tool in the foreground.
@@ -12,23 +11,17 @@ import sys
 from multiprocessing import Process
 from pathlib import Path
 
-if __package__:
-    # Module execution, e.g. `python -m src.runners.run_benchmarks`.
-    from ..servers import dashboard, metrics_server
-    from ..tools import plot_figures
-else:
-    # Direct script execution fallback.
-    here = Path(__file__).resolve().parent
-    src_dir = None
-    for p in [here] + list(here.parents):
-        if (p / 'servers').is_dir():
-            src_dir = p
-            break
-    if src_dir is None:
-        src_dir = here.parent
-    sys.path.insert(0, str(src_dir))
-    from servers import dashboard, metrics_server
-    from tools import plot_figures
+def _ensure_repo_root_on_path() -> Path:
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    return repo_root
+
+
+_ensure_repo_root_on_path()
+
+from src.servers import dashboard, metrics_server
+from src.tools import plot_figures
 
 
 def _stop_processes(processes):

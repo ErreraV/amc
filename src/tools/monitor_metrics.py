@@ -1,5 +1,15 @@
-#!/usr/bin/env python3
-"""Monitor the metrics server health endpoint and log event counts."""
+"""Monitor the metrics server health endpoint and log event counts.
+
+Description:
+    Polls the metrics server health endpoint and records event counts to
+    stdout or a CSV file for offline plotting.
+
+How to run:
+    From the repository root with your virtualenv active:
+        python src/amc/src/tools/monitor_metrics.py --metrics-url http://127.0.0.1:5001 --interval 1.0
+
+    See `--help` for available options.
+"""
 import time
 import requests
 import argparse

@@ -1,4 +1,5 @@
 {
+  "model": "Integrated_AMC__TABLE",
   "average_ber": 0.018472581261146526,
   "average_bler": 0.33678343949044587,
   "average_throughput_mbps": 81.58078980891717,

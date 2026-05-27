@@ -1,4 +1,13 @@
-#!/usr/bin/env python3
+
+"""Torch-based Sionna server helpers (alternate entrypoints).
+
+Description:
+    Optional helpers for running Sionna/Torch-based PHY simulations. This file
+    complements `sionna_server.py` and is intended to be imported when required.
+
+How to use:
+    Import into your test code; running directly is not required.
+"""
 
 import os
 if os.getenv("CUDA_VISIBLE_DEVICES") is None:

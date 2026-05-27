@@ -1,4 +1,18 @@
-#!/usr/bin/env python3
+"""Core AMC server implementation and flow state management.
+
+Description:
+    Contains the main `IntegratedAMCServer`-related components: flow state
+    management, preprocessing helpers and production inference glue used by
+    the AMC server implementation.
+
+How to run / use:
+    This module is normally imported by the runner scripts. To start the full
+    integrated system, run:
+        python src/amc/src/runners/run_amc_with_analytics.py
+
+    Import directly in Python to access classes:
+        from src.amc.amc import IntegratedAMCServer
+"""
 
 import numpy as np
 import torch
@@ -17,7 +31,7 @@ from pathlib import Path
 # Ensure repo root is on path so absolute imports work when run directly
 repo_root = str(Path(__file__).resolve().parent.parent.parent)
 if repo_root not in sys.path:
-    sys.path.insert(0, repo_root)
+        sys.path.insert(0, repo_root)
 
 from src.amc.gan_snr_predictor import SNRGan, GANConfig, SNRDataProcessor
 from src.servers.amc_server import AdvancedQLearningAgent, json_serializable, safe_json_dumps

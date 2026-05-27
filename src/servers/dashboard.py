@@ -1,6 +1,16 @@
-#!/usr/bin/env python3
-"""
-Flask dashboard for real-time latency visualization
+"""Flask dashboard for real-time latency visualization.
+
+Description:
+    Provides a small Flask application exposing endpoints for real-time
+    latency histograms and a simple dashboard frontend used to monitor
+    AMC decision performance.
+
+How to run:
+    Start the metrics server and dashboard together (from repo root):
+        python src/amc/src/runners/run_dashboard_metrics.py
+
+    Or run the dashboard directly (ensure `src` is on `PYTHONPATH`):
+        python src/amc/src/servers/dashboard.py
 """
 
 import logging

@@ -1,8 +1,12 @@
-#!/usr/bin/env python3
-"""
-GAN Model Benchmark
+"""GAN Model Benchmark
 Measures inference time and resource consumption for SNRGan model
 Generates histograms and performance statistics
+
+How to run:
+    From the repository root with your virtualenv active (ensure `src` added to PYTHONPATH):
+        python src/amc/benchmarks/GAN_benchmark.py
+
+    The script may accept command-line args; run with `--help` if available.
 """
 
 import torch

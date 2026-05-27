@@ -1,8 +1,13 @@
-#!/usr/bin/env python3
-"""
-Real-time performance analysis with latency histograms
-"""
+"""Real-time performance analysis with latency histograms.
 
+Description:
+    Utilities and data structures for collecting, summarizing and exposing
+    real-time performance metrics (latency histograms, error summaries, etc.).
+
+How to use:
+    Import from other modules to record and summarize `PerformanceMetrics`:
+        from src.amc.performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
+"""
 import time
 import threading
 import numpy as np

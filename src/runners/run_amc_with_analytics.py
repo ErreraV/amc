@@ -1,29 +1,33 @@
-#!/usr/bin/env python3
-"""
-Integrated runner for AMC server + Dashboard with real-time histogram visualization
-"""
+"""Integrated runner for AMC server + Dashboard with real-time histogram visualization.
 
+Description:
+    Starts an integrated setup with the AMC server, a metrics server and the
+    dashboard so you can observe real-time analytics locally.
+
+How to run:
+    From the repository root with your virtualenv active:
+        python src/amc/src/runners/run_amc_with_analytics.py
+
+    Use command-line flags for optional arguments; run with `--help` for details.
+"""
+import argparse
 import sys
 from multiprocessing import Process
 import time
 import logging
 from pathlib import Path
 
-if __package__:
-    from ..servers import dashboard, metrics_server
-else:
-    import sys as _sys
+def _ensure_repo_root_on_path() -> Path:
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    return repo_root
 
-    here = Path(__file__).resolve().parent
-    src_dir = None
-    for p in [here] + list(here.parents):
-        if (p / 'servers').is_dir():
-            src_dir = p
-            break
-    if src_dir is None:
-        src_dir = here.parent
-    _sys.path.insert(0, str(src_dir))
-    from servers import dashboard, metrics_server
+
+_ensure_repo_root_on_path()
+
+from src.amc.amc import IntegratedAMCServer
+from src.servers import dashboard, metrics_server
 
 # Configure logging
 logging.basicConfig(
@@ -46,40 +50,51 @@ def start_metrics(host: str = '127.0.0.1', port: int = 5001):
     logger.info(f"Starting metrics server on {host}:{port}")
     metrics_server.run_metrics_server(host=host, port=port)
 
-def main():
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Integrated AMC Server with metrics server and dashboard",
+    )
+    parser.add_argument('--no-gan', action='store_true', help='Disable GAN prediction')
+    parser.add_argument('--method', choices=['table', 'rl'], default='rl', help='Decision method to use (table or rl)')
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='AMC server host')
+    parser.add_argument('--port', type=int, default=9001, help='AMC server port')
+    parser.add_argument('--metrics-host', type=str, default='127.0.0.1', help='Metrics server host')
+    parser.add_argument('--metrics-port', type=int, default=5001, help='Metrics server port')
+    parser.add_argument('--dashboard-host', type=str, default='0.0.0.0', help='Dashboard host')
+    parser.add_argument('--dashboard-port', type=int, default=5000, help='Dashboard port')
+    return parser
+
+def main(argv=None):
     """Start AMC server and dashboard together"""
+
+    args = build_parser().parse_args(argv)
     
     logger.info("=" * 60)
     logger.info("AMC Server with Real-Time Histogram Dashboard")
     logger.info("=" * 60)
-    
-    # Check required files (in data directory)
-    required_files = [
-        Path(__file__).parent.parent.parent / 'data' / 'enhanced_snr_preprocessing.pkl',
-    ]
-    
-    for fname in required_files:
-        if not fname.exists():
-            logger.error(f"❌ Required file not found: {fname}")
-            return 1
-    
-    logger.info("✓ All required files found")
+
+    training_data_file = str(Path(__file__).parent.parent.parent / 'data' / 'gan_training_data_enhanced.json')
+    preprocessing_file = str(Path(__file__).parent.parent.parent / 'data' / 'enhanced_snr_preprocessing.pkl')
+
+    if not Path(training_data_file).exists():
+        logger.warning(f"Training data file '{training_data_file}' not found.")
+        training_data_file = None
+
+    if not args.no_gan and not Path(preprocessing_file).exists():
+        logger.error(f"Preprocessing file '{preprocessing_file}' not found, but GAN is enabled. Exiting.")
+        return 1
     
     try:
-        # Import after checking files
-        from ..amc.integrated_amc_gan_enzo import IntegratedAMCServer
-
-        metrics_host = '127.0.0.1'
-        metrics_port = 5001
-        dashboard_host = '0.0.0.0'
-        dashboard_port = 5000
         processes = []
+
+        use_gan = not args.no_gan
 
         # Start metrics server in a separate process
         logger.info("Starting metrics server in a separate process...")
         metrics_process = Process(
             target=start_metrics,
-            kwargs={'host': metrics_host, 'port': metrics_port},
+            kwargs={'host': args.metrics_host, 'port': args.metrics_port},
             daemon=True,
         )
         metrics_process.start()
@@ -88,22 +103,25 @@ def main():
         logger.info("✓ Metrics server started")
         
         # Create AMC server
-        logger.info("Initializing integrated AMC server...")
+        logger.info("Initializing AMC server from src.amc.amc...")
         server = IntegratedAMCServer(
-            host='127.0.0.1',
-            port=9001
+            host=args.host,
+            port=args.port,
+            training_data_file=training_data_file,
+            use_gan=use_gan,
+            method=args.method,
         )
         logger.info(f"✓ AMC Server initialized with analyzer: {server.analyzer}")
         
         # Start dashboard in a separate process
-        metrics_url = f"http://{metrics_host}:{metrics_port}"
-        logger.info(f"Starting dashboard server on port {dashboard_port}...")
+        metrics_url = f"http://{args.metrics_host}:{args.metrics_port}"
+        logger.info(f"Starting dashboard server on port {args.dashboard_port}...")
         logger.info(f"  Pointing dashboard to metrics server: {metrics_url}")
         dashboard_process = Process(
             target=dashboard.run_dashboard,
             kwargs={
-                'host': dashboard_host,
-                'port': dashboard_port,
+                'host': args.dashboard_host,
+                'port': args.dashboard_port,
                 'debug': False,
                 'metrics_server_url': metrics_url,
             },
@@ -118,9 +136,9 @@ def main():
         logger.info("=" * 60)
         logger.info("🎯 Services Running:")
         logger.info("")
-        logger.info("  📊 Dashboard URL:     http://localhost:5000")
-        logger.info("  📡 Metrics Server:    http://127.0.0.1:5001")
-        logger.info("  🔌 AMC Server:        127.0.0.1:9001")
+        logger.info(f"  📊 Dashboard URL:     http://{args.dashboard_host}:{args.dashboard_port}")
+        logger.info(f"  📡 Metrics Server:    http://{args.metrics_host}:{args.metrics_port}")
+        logger.info(f"  🔌 AMC Server:        {args.host}:{args.port}")
         logger.info("  📈 Sionna Expected:   127.0.0.1:9000")
         logger.info("")
         logger.info("Features:")

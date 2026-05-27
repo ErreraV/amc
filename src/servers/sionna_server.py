@@ -1,4 +1,15 @@
-#!/usr/bin/env python3
+"""Optional Sionna-based PHY simulation helpers and server.
+
+Description:
+  Contains utilities that wrap Sionna PHY components (Rayleigh/AWGN
+  simulators) for more realistic physical-layer impairments. This module is
+  optional and falls back when Sionna is not available.
+
+How to use:
+  Import the classes from other parts of the project. Running this file
+  directly is not required; the module is intended to be imported by the
+  server or test harnesses.
+"""
 
 import os
 if os.getenv("CUDA_VISIBLE_DEVICES") is None:

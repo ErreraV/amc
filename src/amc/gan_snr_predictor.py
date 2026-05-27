@@ -1,4 +1,16 @@
-#!/usr/bin/env python3
+"""GAN-based SNR predictor: model definitions and helpers.
+
+Description:
+    Implements `SNRGan`, generator/discriminator models and `GANConfig` used
+    to predict SNR values from historical channel data.
+
+How to use:
+    Import the classes where you need them:
+        from src.amc.gan_snr_predictor import SNRGan, GANConfig
+
+    Training and evaluation are performed via project-specific training scripts
+    (see the `models/gan` folder for saved checkpoints).
+"""
 
 import torch
 import torch.nn as nn

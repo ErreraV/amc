@@ -1,3 +1,6 @@
+## Requirements for the AMC project (used for local development)
+## Install with:
+##   python -m pip install -r src/amc/requirements.txt
 flask
 flask-cors
 requests

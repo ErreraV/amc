@@ -1,4 +1,5 @@
 {
+  "model": "Integrated_AMC__RL",
   "average_ber": 0.012181528324840754,
   "average_bler": 0.2376592356687898,
   "average_throughput_mbps": 84.90052229299366,

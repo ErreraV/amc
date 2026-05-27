@@ -1,4 +1,17 @@
-#!/usr/bin/env python3
+"""AMC TCP server and decision agent implementations.
+
+Description:
+    Implements `AdvancedQLearningAgent` and the TCP server glue that receives
+    requests and responds with modulation decisions. Also contains JSON
+    serialization helpers used by the server.
+
+How to run:
+    The server is normally started via runner scripts. To run the AMC server
+    alone, run the integrated runner or see packaging scripts in the repo.
+
+How to import:
+        from src.servers.amc_server import AdvancedQLearningAgent
+"""
 
 import numpy as np
 import json

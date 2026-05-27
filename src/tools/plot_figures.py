@@ -1,9 +1,8 @@
-#!/usr/bin/env python3
 """Fetch raw events from the metrics server and generate performance figures.
 
 Usage examples:
-    python -m tools.plot_figures --metrics-url http://127.0.0.1:5001 --outdir /tmp/plots
-    python -m tools.plot_figures --metrics-url http://metrics:5001 --fig 1 2 5
+        python -m tools.plot_figures --metrics-url http://127.0.0.1:5001 --outdir /tmp/plots
+        python -m tools.plot_figures --metrics-url http://metrics:5001 --fig 1 2 5
 
 Figures produced:
  - Fig 1: Decision latency histogram (decision_latency_ms)
@@ -14,6 +13,11 @@ Figures produced:
  - Fig 6: BER versus SNR (binned boxplot)
  - Fig 7: BLER versus SNR (binned boxplot)
  - Fig 8: Normalized Spectral Efficiency (Fractional Shannon Capacity)
+
+How to run:
+    From the repository root with your virtualenv active:
+        python -m src.amc.src.tools.plot_figures --metrics-url http://127.0.0.1:5001 --outdir /tmp/plots
+    Or run the module directly when `src` is on `PYTHONPATH`.
 """
 from __future__ import annotations
 
