@@ -1,3 +1,61 @@
+# General setup
+
+1. Create a local environment file from the template:
+	`cp example.env .env`
+ 
+Prerequisites: this project expects `tmux` and `docker` to be installed on your system.
+On Debian/Ubuntu you can install them with:
+
+```bash
+sudo apt update
+sudo apt install -y tmux docker.io
+```
+
+On Fedora/CentOS derivatives use:
+
+```bash
+sudo dnf install -y tmux docker
+sudo systemctl enable --now docker
+```
+
+## Additional prerequisites
+
+- Python: this project targets **Python 3.12**. Create and activate a venv:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+```
+
+- Python dependencies: install from `requirements.txt`:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+- System build tools (required to build ns-3 and native extensions). Example for Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake pkg-config git wget lsof nmap python3.12-venv python3.12-dev
+```
+
+- Docker permissions: Docker commands may require `sudo` or adding your user to the `docker` group:
+
+```bash
+sudo usermod -aG docker $USER
+# then log out and back in for the group change to take effect
+```
+
+- CUDA / GPU (optional): If you plan to run models on GPU, ensure matching NVIDIA drivers and CUDA toolkit are installed and install a compatible PyTorch build.
+
+- Optional helpers: `python-dotenv` is optional but the project will auto-discover a `.env` file if available. For ns-3 dev the README already recommends `cppyy` and `pygraphviz`.
+
+2. Create and activate a Python 3.12 virtual environment for local development.
+3. Install the Python dependencies from `requirements.txt`.
+4. Review the available local tasks with `make help`.
+5. Start the services you need with the matching `make` target, such as `make run-amc` or `make run-dashboard-metrics`.
+
 # Notes
 
 ### SSH commmand to run the amc on the server and benchmarks locally
@@ -5,9 +63,6 @@
 ```bash
 ssh -R 5001:localhost:5001 username@server
 ```
-
-
-
 ### ns3 Build+Install
 This was made to work properly with the pre-built python ns3 wrapper
 
@@ -17,10 +72,7 @@ This was made to work properly with the pre-built python ns3 wrapper
 cd
 mkdir amc_ws
 cd amc_ws
-
 ```
-
-
 #### venv creation
 
 Creating a basic virtual environement for python 3.12
@@ -39,7 +91,6 @@ pip install <package-name> --force-reinstall
 pip install <package-name> --force-reinstall --no-cache
 ###example (after we broke tensorflow version):
 pip install sionna-no-rt --force-reinstall --no-cache 
-
 ```
 #### custom PATH creation
 
@@ -70,11 +121,8 @@ mkdir build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$VENVNS3
 make -j$(nproc)
 make install
-
 ```
 #### custom configured and built ns3
-
-
 
 ```
 cd ~/amc_ws
@@ -84,8 +132,6 @@ cd click/
 make -j
 make install
 ```
-
-
 ```
 cd ~/amc_ws
 wget https://www.nsnam.org/releases/ns-allinone-3.44.tar.bz2
@@ -95,20 +141,13 @@ cd ns-allinone-3.44
 
 #in .profile or .bash_profile
 export NS3SRC=$HOME/ns-allinone-3.44/ns-3.44/
-
-
 ```
-
 ```
 cd $NS3SRC/contrib
 #you should check right nr version compatible with ns3 on https://cttc-lena.gitlab.io/nr/html/index.html#autotoc_md153
 
 git cl one https://gitlab.com/cttc-lena/nr.git -b  5g-lena-v4.0.y
 ```
-
-
-
-
 ```
 cd $NS3SRC
 
@@ -116,11 +155,6 @@ cd $NS3SRC
 --enable-python-bindings --enable-build-version --prefix=$VENVNS3/ \
 -- -DNS3_BINDINGS_INSTALL_DIR="${PIP_SITE}"
 ```
-
-
-
-
-
 TODO: Find-out why the installation doesnt work when using custom built python bidings
 
 SUGESTIONS: Python bidings could make programming diferent ns3 scenarios easier

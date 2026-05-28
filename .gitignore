@@ -5,3 +5,4 @@ logs/
 sionna_server.log
 models/**/*.pth
 models/**/*.json
+.env
