@@ -57,8 +57,10 @@ def _json_safe(value: Any) -> Any:
 class EventPublisher:
     """Asynchronous publisher that writes JSONL to disk and POSTs to metrics server."""
 
-    def __init__(self, server_url: str = "http://127.0.0.1:5001/ingest_event", disk_path: Optional[str] = None, max_queue=10000):
-        self.server_url = server_url
+    def __init__(self, server_url: Optional[str] = None, disk_path: Optional[str] = None, max_queue=10000):
+        # Prefer explicit constructor argument, then environment, then fallback
+        import os
+        self.server_url = server_url or os.getenv('EVENT_PUBLISHER_URL', 'http://127.0.0.1:5001/ingest_event')
         self.disk_path = Path(disk_path) if disk_path else None
         self._q = queue.Queue(maxsize=max_queue)
         self._stop = threading.Event()

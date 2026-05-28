@@ -22,6 +22,8 @@ _ensure_repo_root_on_path()
 
 from src.servers import dashboard, metrics_server
 from src.tools import plot_figures
+from src.utils.env import ensure_loaded
+import os
 
 
 def _stop_processes(processes):
@@ -39,10 +41,12 @@ def start_metrics(host: str = '127.0.0.1', port: int = 5001):
 
 
 def main():
-    metrics_host = '127.0.0.1'
-    metrics_port = 5001
-    dashboard_host = '0.0.0.0'
-    dashboard_port = 5000
+    ensure_loaded()
+
+    metrics_host = os.getenv('METRICS_HOST', '127.0.0.1')
+    metrics_port = int(os.getenv('METRICS_PORT', 5001))
+    dashboard_host = os.getenv('DASHBOARD_HOST', '0.0.0.0')
+    dashboard_port = int(os.getenv('DASHBOARD_PORT', 5000))
 
     processes = []
 

@@ -14,6 +14,7 @@ import argparse
 import sys
 from multiprocessing import Process
 import time
+import os
 import logging
 from pathlib import Path
 
@@ -28,6 +29,7 @@ _ensure_repo_root_on_path()
 
 from src.amc.amc import IntegratedAMCServer
 from src.servers import dashboard, metrics_server
+from src.utils.env import ensure_loaded, get, getint
 
 # Configure logging
 logging.basicConfig(
@@ -68,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None):
     """Start AMC server and dashboard together"""
 
+    # Load environment (optional python-dotenv support)
+    ensure_loaded()
+
     args = build_parser().parse_args(argv)
     
     logger.info("=" * 60)
@@ -90,13 +95,20 @@ def main(argv=None):
 
         use_gan = not args.no_gan
 
-        # Start metrics server in a separate process
-        logger.info("Starting metrics server in a separate process...")
-        metrics_process = Process(
-            target=start_metrics,
-            kwargs={'host': args.metrics_host, 'port': args.metrics_port},
-            daemon=True,
-        )
+            # Override CLI values with environment variables when present
+            args.metrics_host = os.getenv('METRICS_HOST', args.metrics_host)
+            args.metrics_port = int(os.getenv('METRICS_PORT', args.metrics_port))
+            args.dashboard_host = os.getenv('DASHBOARD_HOST', args.dashboard_host)
+            args.dashboard_port = int(os.getenv('DASHBOARD_PORT', args.dashboard_port))
+            args.host = os.getenv('AMC_HOST', args.host)
+            args.port = int(os.getenv('AMC_PORT', args.port))
+
+            logger.info("Starting metrics server in a separate process...")
+            metrics_process = Process(
+                target=start_metrics,
+                kwargs={'host': args.metrics_host, 'port': args.metrics_port},
+                daemon=True,
+            )
         metrics_process.start()
         processes.append(metrics_process)
         time.sleep(0.2)

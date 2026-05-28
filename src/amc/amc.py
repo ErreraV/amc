@@ -37,6 +37,8 @@ from src.amc.gan_snr_predictor import SNRGan, GANConfig, SNRDataProcessor
 from src.servers.amc_server import AdvancedQLearningAgent, json_serializable, safe_json_dumps
 from src.amc.performance_analyzer import RealtimeAnalyzer, PerformanceMetrics
 from src.tools.event_publisher import EventPublisher
+from src.utils.env import ensure_loaded
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -764,7 +766,14 @@ def main():
     parser.add_argument('--method', choices=['table', 'rl'], default='rl', help='Decision method to use (table or rl)')
     parser.add_argument('--host', type=str, default='127.0.0.1')
     parser.add_argument('--port', type=int, default=9001)
+    # Load environment (optional python-dotenv support)
+    ensure_loaded()
+
     args = parser.parse_args()
+
+    # Allow environment to override CLI defaults
+    args.host = os.getenv('AMC_HOST', args.host)
+    args.port = int(os.getenv('AMC_PORT', args.port))
 
     logging.basicConfig(
         level=logging.INFO,
