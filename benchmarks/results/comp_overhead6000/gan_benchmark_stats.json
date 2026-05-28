@@ -1,0 +1,32 @@
+{
+  "total_iterations": 6000,
+  "device": "cuda",
+  "torch_compile": {
+    "enabled": true,
+    "mode": "reduce-overhead",
+    "compilation_time_sec": 0.5277776199982327
+  },
+  "inference_time_ms": {
+    "mean": 0.6876765052886998,
+    "std": 8.57247020913225,
+    "min": 0.24493599994457327,
+    "max": 616.1661080004706,
+    "median": 0.5057844991824823,
+    "p95": 0.903762947382347,
+    "p99": 1.2188070601041552
+  },
+  "memory_cpu_mb": {
+    "rss_mean": 1425.1638922353254,
+    "rss_max": 1425.60546875,
+    "vms_mean": 12870.21686498087
+  },
+  "memory_gpu_mb": {
+    "allocated_mean": 0.5747072204329717,
+    "allocated_max": 0.5751953125,
+    "reserved_mean": 38.0
+  },
+  "cpu_percent": {
+    "mean": 101.43281673769857,
+    "max": 198.9
+  }
+}

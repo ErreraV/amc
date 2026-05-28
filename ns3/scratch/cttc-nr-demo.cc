@@ -131,6 +131,8 @@ RealisticChannelConfig global_channel_config;
 DynamicMobilityConfig global_mobility_config;
 double simTime = 60.0;
 
+int global_packet_size=64;
+
 RealisticChannelConfig GetChannelConfigForEnvironment(ChannelEnvironment env, double distance) {
     RealisticChannelConfig config = global_channel_config;
     config.distance = distance;
@@ -475,7 +477,12 @@ void SimulateTransmissionFallback(uint32_t flowId, int k, double snr_db,
     bler = std::clamp(bler, 0.0, 1.0);
 
     bool success = bler < 0.5;
-    double throughput = success ? (k * 8.0 * (1.0 - bler) * 0.001) : 0.0;
+    double base_rate = 4.0;
+    if (modulation == "qam4") base_rate = 2.0;
+    else if (modulation == "qam64") base_rate = 6.0;
+    else if (modulation == "qam256") base_rate = 8.0;
+
+    double throughput = success ? (base_rate * (1.0 - bler) * 0.85 * 50.0) : 0.0;
 
     uint32_t packetSize = k / 8;
     double delay = Simulator::Now().GetSeconds();
@@ -492,8 +499,8 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
                                    std::string previousModulation = "") {
 
     if (k <= 0 || k > 10000) {
-        NS_LOG_WARN("Invalid packet size: " << k << ", correcting to 64");
-        k = 64;
+        NS_LOG_WARN("Invalid packet size: " << k << ", correcting to " << global_packet_size << " bits");
+        k = global_packet_size;
     }
 
     if (snr_db < -10 || snr_db > 50) {
@@ -537,6 +544,7 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
     }
 
     json payload = {
+        {"type", "NS3_simulation"},
         {"id", static_cast<int>(flowId)},
         {"k", k},
         {"modulation", selectedModulation},
@@ -619,7 +627,12 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
 
                             if (!use_sionna_throughput || throughput <= 0) {
                                 if (transmission_success) {
-                                    throughput = (k * 8.0 * (1.0 - bler)) / 1000.0;
+                                    double base_rate = 4.0; // default for QAM-16
+                                    if (selectedModulation == "qam4") base_rate = 2.0;
+                                    else if (selectedModulation == "qam64") base_rate = 6.0;
+                                    else if (selectedModulation == "qam256") base_rate = 8.0;
+                                    
+                                    throughput = base_rate * (1.0 - bler) * 0.85 * 50.0;
                                     NS_LOG_WARN("Sionna throughput not available, using fallback: " << throughput);
                                 } else {
                                     throughput = 0.0;
@@ -677,8 +690,13 @@ void SendToSionnaWithDynamicChannel(uint32_t flowId, int k, double snr_db,
         ber *= dis(gen);
         bler *= dis(gen);
 
+        double base_rate = 4.0;
+        if (selectedModulation == "qam4") base_rate = 2.0;
+        else if (selectedModulation == "qam64") base_rate = 6.0;
+        else if (selectedModulation == "qam256") base_rate = 8.0;
+
         transmission_success = bler < 0.5;
-        throughput = transmission_success ? (k * 8.0 * (1.0 - bler) * 0.001) : 0.0;
+        throughput = transmission_success ? (base_rate * (1.0 - bler) * 0.85 * 50.0) : 0.0;
         use_sionna_throughput = false;
     }
 
@@ -987,7 +1005,7 @@ void ScheduleDynamicTransmissions() {
             }
 
             Simulator::Schedule(MilliSeconds(10), &SendToSionnaWithDynamicChannel,
-                              flowId, 64, current_data->snr_db, *current_data,
+                              flowId, global_packet_size, current_data->snr_db, *current_data,
                               prevThroughput, prevBER, prevBLER, prevModulation);
         } else {
             NS_LOG_WARN("No recent mobility data for Flow " << flowId);
@@ -1088,6 +1106,8 @@ int main(int argc, char* argv[])
     cmd.AddValue("ganDataFile", "Output file for GAN training data", ganDataFile);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("mobilityType", "Mobility type (0=STATIC, 1=LINEAR, 2=CIRCULAR, 3=RANDOM_WALK, 4=HIGHWAY, 5=URBAN_GRID)", mobilityType);
+    cmd.AddValue("packetSize", "Packet size for simulation", global_packet_size);
+
 
     cmd.Parse(argc, argv);
     global_mobility_config.type = static_cast<MobilityType>(mobilityType);
@@ -1138,19 +1158,41 @@ int main(int argc, char* argv[])
 
     CcBwpCreator::SimpleOperationBandConf bandConf1(centralFrequencyBand1,
                                                     bandwidthBand1,
-                                                    numCcPerBand,
-                                                    BandwidthPartInfo::UMi_StreetCanyon);
+                                                    numCcPerBand//,
+                                                    // BandwidthPartInfo::UMi_StreetCanyon
+                                                );
+            
 
     OperationBandInfo band1 = ccBwpCreator.CreateOperationBandContiguousCc(bandConf1);
 
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(100)));
-    nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
-    nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(true));
+    // Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(100)));
+    // nrHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
+    // nrHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(true));
+    // nrHelper->InitializeOperationBand(&band1);
 
-    nrHelper->InitializeOperationBand(&band1);
+    // Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>(); 
+    //     channelHelper->ConfigureFactories(
+    //     scenario,
+    //     "Default",
+    //     "ThreeGpp"); // Configure the spectrum channel with the scenario
+    // channelHelper->AssignChannelsToBands({band1});
+
+    Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+    channelHelper->ConfigureFactories("UMi", "Default", "ThreeGpp");
+    /**
+     * Use channelHelper API to define the attributes for the channel model (condition, pathloss and
+     * spectrum)
+     */
+    channelHelper->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(100)));
+    channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(true));
+    channelHelper->AssignChannelsToBands({band1});
     allBwps = CcBwpCreator::GetAllBwps({band1});
-
+    
     double x = pow(10, totalTxPower / 10);
+
+
+
+
 
     Packet::EnableChecking();
     Packet::EnablePrinting();

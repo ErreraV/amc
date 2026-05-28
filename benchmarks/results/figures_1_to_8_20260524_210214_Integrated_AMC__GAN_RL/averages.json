@@ -1,0 +1,9 @@
+{
+  "model": "Integrated_AMC__GAN_RL",
+  "average_ber": 0.014679036100000023,
+  "average_bler": 0.2555,
+  "average_throughput_mbps": 82.03829333333324,
+  "average_spectral_efficiency": 1.640765866666666,
+  "average_normalized_spectral_efficiency": 0.32524835839493355,
+  "average_latency_ms": 51.30173969268799
+}

@@ -1,0 +1,9 @@
+{
+  "model": "Integrated_AMC__TABLE",
+  "average_ber": 0.018472581261146526,
+  "average_bler": 0.33678343949044587,
+  "average_throughput_mbps": 81.58078980891717,
+  "average_spectral_efficiency": 1.631615796178345,
+  "average_normalized_spectral_efficiency": 0.31472164481204723,
+  "average_latency_ms": 4.612698069043979
+}

@@ -1,4 +1,17 @@
-#!/usr/bin/env python3
+"""AMC TCP server and decision agent implementations.
+
+Description:
+    Implements `AdvancedQLearningAgent` and the TCP server glue that receives
+    requests and responds with modulation decisions. Also contains JSON
+    serialization helpers used by the server.
+
+How to run:
+    The server is normally started via runner scripts. To run the AMC server
+    alone, run the integrated runner or see packaging scripts in the repo.
+
+How to import:
+        from src.servers.amc_server import AdvancedQLearningAgent
+"""
 
 import numpy as np
 import json
@@ -16,6 +29,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 from typing import Dict, List, Tuple, Optional, Any
 import random
+from pathlib import Path
+from ..tools.event_publisher import EventPublisher
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -66,10 +81,10 @@ class AdvancedQLearningAgent:
         }
 
         self.snr_safety_rules = {
-            "qam4":   {"min_snr": -10, "max_snr": 10},
-            "qam16":  {"min_snr": 8,   "max_snr": 18},
-            "qam64":  {"min_snr": 15,  "max_snr": 25},
-            "qam256": {"min_snr": 20,  "max_snr": 50}
+            "qam4":   {"min_snr": -10, "max_snr": 5},
+            "qam16":  {"min_snr": 1.5, "max_snr": 12},
+            "qam64":  {"min_snr": 8.5, "max_snr": 20},
+            "qam256": {"min_snr": 15.5, "max_snr": 50}
         }
 
         self.confidence_threshold = 0.7
@@ -170,7 +185,7 @@ class AdvancedQLearningAgent:
             reward < -50 or
             not self._is_action_safe(action, snr) or
             (snr > 25 and action == 0) or
-            (snr < 12 and action >= 2)
+            (snr < 8.5 and action >= 2)
         )
         self.recent_bad_choices.append(1.0 if is_bad_choice else 0.0)
         if len(self.recent_bad_choices) > self.max_bad_choices_history:
@@ -259,7 +274,7 @@ class AdvancedQLearningAgent:
 
         snr_mod_reward = 0
 
-        if snr >= 24:
+        if snr >= 16:
             if modulation == "qam256":
                 snr_mod_reward = 50
             elif modulation == "qam64":
@@ -269,7 +284,7 @@ class AdvancedQLearningAgent:
             else:
                 snr_mod_reward = -60
 
-        elif snr >= 20:
+        elif snr >= 12:
             if modulation == "qam64":
                 snr_mod_reward = 45
             elif modulation == "qam256":
@@ -279,7 +294,7 @@ class AdvancedQLearningAgent:
             else:
                 snr_mod_reward = -30
 
-        elif snr >= 15:
+        elif snr >= 8:
             if modulation == "qam16":
                 snr_mod_reward = 40
             elif modulation == "qam64":
@@ -289,7 +304,7 @@ class AdvancedQLearningAgent:
             else:
                 snr_mod_reward = -10
 
-        elif snr >= 10:
+        elif snr >= 3:
             if modulation == "qam16":
                 snr_mod_reward = 35
             elif modulation == "qam4":
@@ -490,6 +505,10 @@ class AdvancedQLearningAgent:
         }
 
     def save_model(self, filename: str = "rl_amc_model_safeguard1.pth"):
+        # Use models/rl/ directory if relative path is given
+        if not Path(filename).is_absolute():
+            filename = str(Path(__file__).parent.parent.parent / 'models' / 'rl' / filename)
+        
         torch.save({
             'q_network_state_dict': self.q_network.state_dict(),
             'target_network_state_dict': self.target_network.state_dict(),
@@ -511,6 +530,10 @@ class AdvancedQLearningAgent:
 
     def load_model(self, filename: str = "rl_amc_model_safeguard1.pth") -> bool:
         try:
+            # Use models/rl/ directory if relative path is given
+            if not Path(filename).is_absolute():
+                filename = str(Path(__file__).parent.parent.parent / 'models' / 'rl' / filename)
+            
             checkpoint = torch.load(filename, map_location=self.device, weights_only=False)
             self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
             self.target_network.load_state_dict(checkpoint['target_network_state_dict'])
@@ -547,6 +570,7 @@ class RLAMCServer:
         self.session_start = time.time()
         self.total_requests = 0
         self.training_mode = True
+        self.event_publisher = EventPublisher()
 
         self.sionna_stats = {
             'total_calls': 0,
@@ -729,6 +753,7 @@ class RLAMCServer:
 
     def process_modulation_request(self, request: Dict) -> Dict:
         try:
+            request_time = time.time()
             snr = request.get('snr', 20.0)
             flow_id = request.get('flow_id', 1)
             feedback = request.get('feedback', None)
@@ -850,6 +875,31 @@ class RLAMCServer:
                         f"BER={sionna_result['ber']:.2e} | BLER={sionna_result['bler']:.3f} | "
                         f"Success={sionna_result['success']} | Safe={response['safety_info']['action_was_safe']}")
 
+            # Publish event to metrics server
+            event = {
+                'run_id': getattr(self, '_run_id', 'run-default'),
+                'config_id': getattr(self, '_config_id', 'cfg-rl-only'),
+                'model_mode': 'rl_only',
+                'model_name': 'RL AMC',
+                'timestamp': time.time(),
+                'flow_id': flow_id,
+                'request_id': f"{flow_id}-{flow_state['packet_count']}",
+                'snr': snr,
+                'channel_info': channel_info,
+                'chosen_modulation': modulation,
+                'decision_method': 'rl',
+                'safety_validated': response['safety_info']['action_was_safe'],
+                'prediction_error': 0.0,
+                'decision_latency_ms': (time.time() - request_time) * 1000 if 'request_time' in locals() else 0.0,
+                'sionna_latency_ms': sionna_result.get('processing_time_ms', 0.0),
+                'gan_latency_ms': 0.0,
+                'ber': sionna_result['ber'],
+                'bler': sionna_result['bler'],
+                'throughput': sionna_result['throughput'],
+                'success': sionna_result['success'],
+            }
+            self.event_publisher.publish(event)
+
             return response
 
         except Exception as e:
@@ -910,8 +960,20 @@ class RLAMCServer:
 
     def handle_client(self, conn, addr):
         try:
-            data = conn.recv(4096).decode()
-            request = json.loads(data)
+            data = ""
+            while True:
+                chunk = conn.recv(65536).decode('utf-8', errors='ignore')
+                if not chunk:
+                    break
+                data += chunk
+                try:
+                    request = json.loads(data)
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+            if not data:
+                return
 
             request_type = request.get('type', 'get_modulation')
             self.total_requests += 1

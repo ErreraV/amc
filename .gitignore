@@ -1,0 +1,8 @@
+/Project/performance_metrics.json
+**/__pycache__/
+**/*.pyc
+logs/
+sionna_server.log
+models/**/*.pth
+models/**/*.json
+.env
