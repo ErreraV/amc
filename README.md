@@ -37,6 +37,8 @@ python src/amc/amc.py --no-gan --method table
 
 1. Create a local environment file from the template:
 	`cp example.env .env`
+
+After copying, open `.env` and set the path to your virtual environment directory so scripts can find your venv (for example, `VENV=.venv` or `VENVNS3=$HOME/venv/ns3`).
  
 Prerequisites: this project expects `tmux` and `docker` to be installed on your system.
 On Debian/Ubuntu you can install them with:
