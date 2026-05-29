@@ -1,3 +1,38 @@
+# How to deploy:
+```
+#This will call the Sionna + AMC+ Dashboard+ NS3+ metric_server
+make deploy-amc-benchmarks 
+```
+
+```
+#On tmux: set-up the mouse:
+(ESC then Ctrl+B then : (two points))
+set -g mouse on
+```
+
+## Change amc config:
+To change AMC config in the dashboard, you can:
+- Kill the amc.py (top right pane)
+- run the following command
+
+```
+#To change the AMC config:
+python src/amc/amc.py [OPTIONS]
+```
+### Possible options:
+- to disable gan: "--no-gan"
+- To use table: "--method table"
+- To use RL (default) : "--method rl"
+- Call for help :"--help"
+ex:
+```
+#Calling the amc without the gan and with the table:
+python src/amc/amc.py --no-gan --method table
+```
+
+
+
+
 # General setup
 
 1. Create a local environment file from the template:
